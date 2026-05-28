@@ -1,7 +1,7 @@
 import json
 
 import anthropic
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -75,16 +75,14 @@ async def fetch_method_gaps(
 
 
 async def generate_suggestions(user_notes: str, db: AsyncSession) -> dict:
-    notes_embedding = embed_text(user_notes)
+    notes_embedding = await embed_text(user_notes)
 
     relevant_papers = await fetch_relevant_papers(notes_embedding, db)
     open_problems = await fetch_relevant_open_problems(notes_embedding, db)
     paper_ids = [p["id"] for p in relevant_papers]
     method_gaps = await fetch_method_gaps(paper_ids, notes_embedding, db)
 
-    papers_block = "\n".join(
-        f"- {p['title']}" for p in relevant_papers
-    )
+    papers_block = "\n".join(f"- {p['title']}" for p in relevant_papers)
     problems_block = "\n".join(f"- {p}" for p in open_problems)
     gaps_block = "\n".join(f"- {m}" for m in method_gaps)
 
@@ -95,12 +93,17 @@ async def generate_suggestions(user_notes: str, db: AsyncSession) -> dict:
         method_gaps=gaps_block or "None yet.",
     )
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    message = client.messages.create(
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
         model=settings.claude_model,
         max_tokens=2048,
         messages=[{"role": "user", "content": prompt}],
     )
 
-    suggestions = json.loads(message.content[0].text.strip())
+    raw = message.content[0].text.strip()
+    try:
+        suggestions = json.loads(raw)
+    except json.JSONDecodeError:
+        suggestions = []
+
     return {"suggestions": suggestions, "relevant_papers": relevant_papers}

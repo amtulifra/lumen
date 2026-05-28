@@ -1,5 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS papers (
     id              TEXT PRIMARY KEY,
@@ -96,12 +97,17 @@ CREATE TABLE IF NOT EXISTS benchmark_drift (
     recorded_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_papers_title_embedding ON papers USING ivfflat (title_embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_claims_embedding ON claims USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_methods_embedding ON methods USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_hypotheses_embedding ON hypotheses USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_open_problems_embedding ON open_problems USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_benchmarks_dataset_metric ON benchmarks (dataset, metric);
+-- HNSW indexes work with any number of rows (unlike ivfflat which needs ~300+)
+CREATE INDEX IF NOT EXISTS idx_papers_title_embedding     ON papers      USING hnsw (title_embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_claims_embedding           ON claims      USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_methods_embedding          ON methods     USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_embedding       ON hypotheses  USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_open_problems_embedding    ON open_problems USING hnsw (embedding vector_cosine_ops);
+
+-- Trigram index for fast fuzzy title matching in citation linking
+CREATE INDEX IF NOT EXISTS idx_papers_title_trgm          ON papers USING gin (title gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_benchmarks_dataset_metric          ON benchmarks (dataset, metric);
 CREATE INDEX IF NOT EXISTS idx_benchmark_drift_dataset_metric_year ON benchmark_drift (dataset, metric, year);
-CREATE INDEX IF NOT EXISTS idx_paper_links_source ON paper_links (source_id);
-CREATE INDEX IF NOT EXISTS idx_paper_links_target ON paper_links (target_id);
+CREATE INDEX IF NOT EXISTS idx_paper_links_source                  ON paper_links (source_id);
+CREATE INDEX IF NOT EXISTS idx_paper_links_target                  ON paper_links (target_id);

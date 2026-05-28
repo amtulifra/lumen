@@ -11,23 +11,26 @@ from researchers.github import find_github_repo, get_user_repos
 from researchers.semantic_scholar import get_author_papers, search_author
 
 
-def extract_research_themes(paper_titles: list[str]) -> list[str]:
+async def extract_research_themes(paper_titles: list[str]) -> list[str]:
     if not paper_titles:
         return []
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     titles_block = "\n".join(f"- {t}" for t in paper_titles[:10])
     prompt = (
         f"Here are recent paper titles by a researcher:\n{titles_block}\n\n"
         "Extract 5 research themes that characterize this researcher's body of work. "
         "Return as a JSON array of strings, nothing else."
     )
-    message = client.messages.create(
+    message = await client.messages.create(
         model=settings.claude_model,
         max_tokens=256,
         messages=[{"role": "user", "content": prompt}],
     )
-    return json.loads(message.content[0].text.strip())
+    try:
+        return json.loads(message.content[0].text.strip())
+    except json.JSONDecodeError:
+        return []
 
 
 async def build_author_profile(
@@ -43,7 +46,7 @@ async def build_author_profile(
     )
     existing_id = existing.scalar_one_or_none()
 
-    ss_data = search_author(author_name)
+    ss_data = await search_author(author_name)
     if not ss_data:
         return None
 
@@ -53,16 +56,16 @@ async def build_author_profile(
     affiliations = ss_data.get("affiliations", [])
     institution = affiliations[0] if affiliations else ""
 
-    ss_papers = get_author_papers(ss_id)
+    ss_papers = await get_author_papers(ss_id)
     paper_titles = [p["title"] for p in ss_papers]
-    themes = extract_research_themes(paper_titles)
+    themes = await extract_research_themes(paper_titles)
 
-    github_url = find_github_repo(paper_title, author_name, paper_abstract)
+    github_url = await find_github_repo(paper_title, author_name, paper_abstract)
     github_username = None
     recent_repos: list[str] = []
     if github_url:
         github_username = github_url.rstrip("/").split("/")[-2]
-        recent_repos = get_user_repos(github_username)
+        recent_repos = await get_user_repos(github_username)
 
     profile_id = existing_id or str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -125,10 +128,7 @@ async def get_profile(researcher_id: str, db: AsyncSession) -> dict | None:
 
 async def get_paper_researchers(paper_id: str, db: AsyncSession) -> list[dict]:
     result = await db.execute(
-        text(
-            "SELECT r.* FROM researchers r "
-            "WHERE r.paper_ids @> :paper_id_json"
-        ),
+        text("SELECT r.* FROM researchers r WHERE r.paper_ids @> :paper_id_json"),
         {"paper_id_json": json.dumps([paper_id])},
     )
     return [dict(row) for row in result.mappings().all()]
@@ -146,7 +146,7 @@ async def refresh_profile(researcher_id: str, db: AsyncSession) -> None:
     paper_ids = row["paper_ids"] or []
     if paper_ids:
         paper_result = await db.execute(
-            text("SELECT title, knowledge_obj->>'abstract' AS abstract FROM papers WHERE id = :id"),
+            text("SELECT title, arxiv_url FROM papers WHERE id = :id"),
             {"id": paper_ids[0]},
         )
         paper = paper_result.mappings().one_or_none()
@@ -154,7 +154,7 @@ async def refresh_profile(researcher_id: str, db: AsyncSession) -> None:
             await build_author_profile(
                 row["name"],
                 paper["title"],
-                paper["abstract"] or "",
+                "",
                 paper_ids[0],
                 db,
             )

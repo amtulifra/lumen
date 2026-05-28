@@ -4,20 +4,17 @@ import feedparser
 
 from config import settings
 from knowledge.embedder import embed_text
-from knowledge.store import paper_exists, save_paper
+from knowledge.store import find_similar_papers, paper_exists
 
 
 async def is_relevant(abstract: str, db) -> bool:
-    from knowledge.store import find_similar_papers
-
-    embedding = embed_text(abstract)
+    embedding = await embed_text(abstract)
     similar = await find_similar_papers(embedding, db, limit=1)
 
     if not similar:
         return False
 
-    top_similarity = similar[0].get("similarity", 0)
-    return top_similarity >= settings.rss_relevance_threshold
+    return similar[0].get("similarity", 0) >= settings.rss_relevance_threshold
 
 
 async def ingest_from_entry(entry, db) -> None:
@@ -40,21 +37,23 @@ async def ingest_from_entry(entry, db) -> None:
 
     pdf_url = arxiv_url.replace("/abs/", "/pdf/") + ".pdf"
 
+    published = entry.get("published_parsed")
+    year = datetime(*published[:3], tzinfo=timezone.utc).year if published else datetime.now(timezone.utc).year
+
     paper_meta = {
         "id": arxiv_id,
         "title": entry.title,
         "authors": [a.get("name", "") for a in entry.get("authors", [])][:5],
-        "year": datetime.now(timezone.utc).year,
+        "year": year,
         "abstract": entry.summary,
         "pdf_url": pdf_url,
         "arxiv_url": arxiv_url,
     }
 
-    paper_text = extract_paper_text(pdf_url)
-    extracted = extract_knowledge(paper_text)
-
-    embeddings = embed_knowledge_object(extracted, paper_meta["title"])
-    paper_id = await save_paper(paper_meta, extracted, embeddings, db)
+    paper_text = await extract_paper_text(pdf_url)
+    extracted = await extract_knowledge(paper_text)
+    embeddings = await embed_knowledge_object(extracted, paper_meta["title"])
+    paper_id = await save_paper(paper_meta, extracted, embeddings, paper_text, db)
 
     await link_by_citation(paper_id, extracted.get("related_work", []), db)
     await link_by_method(paper_id, extracted.get("methods", []), embeddings["methods"], db)

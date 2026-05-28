@@ -1,13 +1,15 @@
 import numpy as np
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from config import settings
 
-client = OpenAI(api_key=settings.openai_api_key)
+
+def _client() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=settings.openai_api_key)
 
 
-def embed_text(text: str) -> list[float]:
-    response = client.embeddings.create(
+async def embed_text(text: str) -> list[float]:
+    response = await _client().embeddings.create(
         model=settings.embedding_model,
         input=text,
         dimensions=settings.embedding_dimensions,
@@ -15,10 +17,10 @@ def embed_text(text: str) -> list[float]:
     return response.data[0].embedding
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    response = client.embeddings.create(
+    response = await _client().embeddings.create(
         model=settings.embedding_model,
         input=texts,
         dimensions=settings.embedding_dimensions,
@@ -26,7 +28,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [item.embedding for item in response.data]
 
 
-def embed_knowledge_object(extracted: dict, title: str) -> dict:
+async def embed_knowledge_object(extracted: dict, title: str) -> dict:
     claims = extracted.get("claims", [])
     methods = extracted.get("methods", [])
     open_problems = extracted.get("open_problems", [])
@@ -34,10 +36,10 @@ def embed_knowledge_object(extracted: dict, title: str) -> dict:
     claim_texts = [c["text"] for c in claims]
     method_texts = [m["description"] for m in methods]
 
-    title_embedding = embed_text(title)
-    claim_embeddings = embed_texts(claim_texts)
-    method_embeddings = embed_texts(method_texts)
-    problem_embeddings = embed_texts(open_problems)
+    title_embedding = await embed_text(title)
+    claim_embeddings = await embed_texts(claim_texts)
+    method_embeddings = await embed_texts(method_texts)
+    problem_embeddings = await embed_texts(open_problems)
 
     return {
         "title": title_embedding,

@@ -16,6 +16,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS papers (
@@ -130,13 +131,14 @@ def upgrade() -> None:
         )
     """)
 
-    op.execute("CREATE INDEX IF NOT EXISTS idx_papers_title_embedding ON papers USING ivfflat (title_embedding vector_cosine_ops) WITH (lists = 100)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_claims_embedding ON claims USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_methods_embedding ON methods USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_hypotheses_embedding ON hypotheses USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_open_problems_embedding ON open_problems USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_benchmarks_dataset_metric ON benchmarks (dataset, metric)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_drift ON benchmark_drift (dataset, metric, year)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_papers_title_embedding     ON papers       USING hnsw (title_embedding vector_cosine_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_claims_embedding           ON claims       USING hnsw (embedding vector_cosine_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_methods_embedding          ON methods      USING hnsw (embedding vector_cosine_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_hypotheses_embedding       ON hypotheses   USING hnsw (embedding vector_cosine_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_open_problems_embedding    ON open_problems USING hnsw (embedding vector_cosine_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_papers_title_trgm          ON papers USING gin (title gin_trgm_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_benchmarks_dataset_metric          ON benchmarks (dataset, metric)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_drift_dataset_metric_year ON benchmark_drift (dataset, metric, year)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_paper_links_source ON paper_links (source_id)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_paper_links_target ON paper_links (target_id)")
 

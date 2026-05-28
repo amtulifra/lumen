@@ -1,4 +1,3 @@
-from Levenshtein import distance as levenshtein_distance
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,17 +8,24 @@ FUZZY_DISTANCE_THRESHOLD = 3
 
 
 async def find_paper_by_title(title: str, db: AsyncSession) -> str | None:
+    # Exact match first
     result = await db.execute(select(PaperRow.id).where(PaperRow.title == title))
     exact = result.scalar_one_or_none()
     if exact:
         return exact
 
-    rows = await db.execute(select(PaperRow.id, PaperRow.title))
-    for row in rows.all():
-        if levenshtein_distance(title.lower(), row.title.lower()) <= FUZZY_DISTANCE_THRESHOLD:
-            return row.id
-
-    return None
+    # Trigram similarity via pg_trgm — avoids full table scan
+    rows = await db.execute(
+        text(
+            "SELECT id FROM papers "
+            "WHERE similarity(title, :title) > 0.6 "
+            "ORDER BY similarity(title, :title) DESC "
+            "LIMIT 1"
+        ),
+        {"title": title},
+    )
+    row = rows.one_or_none()
+    return row.id if row else None
 
 
 async def link_by_citation(paper_id: str, related_titles: list[str], db: AsyncSession) -> None:

@@ -1,8 +1,9 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
-from ingestion.pdf import clean_text, truncate_to_budget, MAX_CHARS
+from ingestion.pdf import clean_text, extract_paper_text, truncate_to_budget, MAX_CHARS
 
 
 class TestCleanText:
@@ -57,22 +58,22 @@ class TestTruncateToBudget:
 
 
 class TestExtractPaperText:
-    def test_downloads_and_extracts(self):
+    async def test_downloads_and_extracts(self):
         fake_pdf_bytes = b"%PDF fake content"
 
         with (
-            patch("ingestion.pdf.download_pdf", return_value=fake_pdf_bytes),
+            patch("ingestion.pdf.download_pdf", new_callable=AsyncMock, return_value=fake_pdf_bytes),
             patch("ingestion.pdf.extract_text", return_value="Extracted text from PDF."),
         ):
-            from ingestion.pdf import extract_paper_text
-            result = extract_paper_text("https://arxiv.org/pdf/1706.03762")
+            result = await extract_paper_text("https://arxiv.org/pdf/1706.03762")
 
         assert "Extracted text from PDF." in result
 
-    def test_raises_on_failed_download(self):
-        import httpx
-
-        with patch("ingestion.pdf.download_pdf", side_effect=httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock())):
-            from ingestion.pdf import extract_paper_text
+    async def test_raises_on_failed_download(self):
+        with patch(
+            "ingestion.pdf.download_pdf",
+            new_callable=AsyncMock,
+            side_effect=httpx.HTTPStatusError("404", request=MagicMock(), response=MagicMock()),
+        ):
             with pytest.raises(httpx.HTTPStatusError):
-                extract_paper_text("https://bad-url.example/file.pdf")
+                await extract_paper_text("https://bad-url.example/file.pdf")

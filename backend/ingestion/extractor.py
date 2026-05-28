@@ -40,12 +40,12 @@ a JSON object with EXACTLY these fields. Be precise and conservative.
 Return ONLY the JSON object. No preamble, no explanation, no markdown fences."""
 
 
-def extract_knowledge(paper_text: str) -> dict:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+async def extract_knowledge(paper_text: str) -> dict:
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-    def call_claude(extra_context: str = "") -> str:
+    async def call_claude(extra_context: str = "") -> str:
         user_content = extra_context + paper_text if extra_context else paper_text
-        message = client.messages.create(
+        message = await client.messages.create(
             model=settings.claude_model,
             max_tokens=4096,
             system=EXTRACTION_SYSTEM_PROMPT,
@@ -53,7 +53,7 @@ def extract_knowledge(paper_text: str) -> dict:
         )
         return message.content[0].text
 
-    raw_response = call_claude()
+    raw_response = await call_claude()
 
     try:
         return json.loads(raw_response)
@@ -62,5 +62,5 @@ def extract_knowledge(paper_text: str) -> dict:
             f"Previous attempt returned invalid JSON: {first_error}\n"
             "Return ONLY valid JSON, nothing else.\n\n"
         )
-        raw_response = call_claude(retry_context)
+        raw_response = await call_claude(retry_context)
         return json.loads(raw_response)

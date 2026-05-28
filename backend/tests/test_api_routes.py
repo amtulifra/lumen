@@ -37,16 +37,15 @@ class TestIngestURL:
         with (
             patch("api.routes.fetch_paper", return_value=FAKE_PAPER_META),
             patch("api.routes.paper_exists", new_callable=AsyncMock, return_value=False),
-            patch("api.routes.extract_paper_text", return_value="paper text"),
-            patch("api.routes.extract_knowledge", return_value=FAKE_EXTRACTED),
-            patch("api.routes.embed_knowledge_object", return_value={"title": FAKE_EMBEDDING, "claims": [], "methods": [], "open_problems": []}),
+            patch("api.routes.extract_paper_text", new_callable=AsyncMock, return_value="paper text"),
+            patch("api.routes.extract_knowledge", new_callable=AsyncMock, return_value=FAKE_EXTRACTED),
+            patch("api.routes.embed_knowledge_object", new_callable=AsyncMock, return_value={"title": FAKE_EMBEDDING, "claims": [], "methods": [], "open_problems": []}),
             patch("api.routes.save_paper", new_callable=AsyncMock),
             patch("api.routes.link_by_citation", new_callable=AsyncMock),
             patch("api.routes.link_by_method", new_callable=AsyncMock),
             patch("api.routes.link_by_benchmark", new_callable=AsyncMock),
             patch("api.routes.detect_contradictions", new_callable=AsyncMock),
             patch("api.routes.check_hypotheses_for_paper", new_callable=AsyncMock),
-            patch("api.routes.build_author_profile", new_callable=AsyncMock),
             patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.post("/ingest", json={"url": "https://arxiv.org/abs/1706.03762"})
@@ -55,6 +54,7 @@ class TestIngestURL:
         data = response.json()
         assert data["paper_id"] == FAKE_PAPER_ID
         assert "knowledge_object" in data
+        assert "from_cache" in data
 
     def test_returns_400_on_bad_url(self, client):
         with patch("api.routes.fetch_paper", side_effect=Exception("arxiv error")):
@@ -75,7 +75,9 @@ class TestIngestURL:
             response = client.post("/ingest", json={"url": "https://arxiv.org/abs/1706.03762"})
 
         assert response.status_code == 200
-        assert response.json()["paper_id"] == FAKE_PAPER_ID
+        data = response.json()
+        assert data["paper_id"] == FAKE_PAPER_ID
+        assert data["from_cache"] is True
 
 
 class TestGetPaper:

@@ -29,7 +29,7 @@ async def paper_exists(paper_id: str, db: AsyncSession) -> bool:
 
 
 async def save_paper(
-    meta: dict, extracted: dict, embeddings: dict, db: AsyncSession
+    meta: dict, extracted: dict, embeddings: dict, raw_text: str, db: AsyncSession
 ) -> str:
     paper_id = meta["id"]
 
@@ -40,6 +40,7 @@ async def save_paper(
         year=meta["year"],
         arxiv_url=meta.get("arxiv_url"),
         pdf_url=meta.get("pdf_url"),
+        raw_text=raw_text,
         knowledge_obj=extracted,
         title_embedding=embeddings["title"],
     )
@@ -150,11 +151,12 @@ async def get_paper(paper_id: str, db: AsyncSession) -> dict | None:
     }
 
 
-async def list_papers(db: AsyncSession, limit: int = 100) -> list[dict]:
+async def list_papers(db: AsyncSession, limit: int = 100, offset: int = 0) -> list[dict]:
     result = await db.execute(
         select(PaperRow.id, PaperRow.title, PaperRow.authors, PaperRow.year, PaperRow.arxiv_url)
         .order_by(PaperRow.id)
         .limit(limit)
+        .offset(offset)
     )
     return [
         {"id": r.id, "title": r.title, "authors": r.authors, "year": r.year, "arxiv_url": r.arxiv_url}

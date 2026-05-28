@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import (
@@ -11,7 +11,7 @@ from api.models import (
     RSSStatusOut,
     SuggestRequest,
 )
-from database import get_db
+from database import SessionLocal, get_db
 from ingestion.arxiv import fetch_paper
 from ingestion.extractor import extract_knowledge
 from ingestion.pdf import extract_paper_text
@@ -48,18 +48,31 @@ from suggestions.hypotheses import (
 router = APIRouter()
 
 
-async def run_full_ingestion(paper_meta: dict, db: AsyncSession) -> dict:
+async def _build_author_profiles(
+    authors: list[str], paper_title: str, paper_abstract: str, paper_id: str
+) -> None:
+    async with SessionLocal() as db:
+        for author in authors:
+            try:
+                await build_author_profile(author, paper_title, paper_abstract, paper_id, db)
+            except Exception:
+                pass
+
+
+async def run_full_ingestion(
+    paper_meta: dict, db: AsyncSession, background_tasks: BackgroundTasks
+) -> dict:
     paper_id = paper_meta["id"]
 
     if await paper_exists(paper_id, db):
         existing = await get_paper(paper_id, db)
-        return {"paper_id": paper_id, "knowledge_object": existing["knowledge_obj"]}
+        return {"paper_id": paper_id, "knowledge_object": existing["knowledge_obj"], "from_cache": True}
 
-    paper_text = extract_paper_text(paper_meta["pdf_url"])
-    extracted = extract_knowledge(paper_text)
-    embeddings = embed_knowledge_object(extracted, paper_meta["title"])
+    paper_text = await extract_paper_text(paper_meta["pdf_url"]) if paper_meta.get("pdf_url") else ""
+    extracted = await extract_knowledge(paper_text or paper_meta.get("abstract", ""))
+    embeddings = await embed_knowledge_object(extracted, paper_meta["title"])
 
-    await save_paper(paper_meta, extracted, embeddings, db)
+    await save_paper(paper_meta, extracted, embeddings, paper_text, db)
 
     await link_by_citation(paper_id, extracted.get("related_work", []), db)
     await link_by_method(paper_id, extracted.get("methods", []), embeddings["methods"], db)
@@ -67,38 +80,53 @@ async def run_full_ingestion(paper_meta: dict, db: AsyncSession) -> dict:
     await detect_contradictions(paper_id, extracted.get("benchmarks", []), db)
     await check_hypotheses_for_paper(paper_id, extracted, db)
 
-    for author in paper_meta.get("authors", []):
-        await build_author_profile(
-            author,
-            paper_meta["title"],
-            paper_meta.get("abstract", ""),
-            paper_id,
-            db,
-        )
+    background_tasks.add_task(
+        _build_author_profiles,
+        paper_meta.get("authors", []),
+        paper_meta["title"],
+        paper_meta.get("abstract", ""),
+        paper_id,
+    )
 
-    return {"paper_id": paper_id, "knowledge_object": extracted}
+    return {"paper_id": paper_id, "knowledge_object": extracted, "from_cache": False}
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest_url(request: IngestURLRequest, db: AsyncSession = Depends(get_db)):
+async def ingest_url(
+    request: IngestURLRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     try:
         paper_meta = fetch_paper(request.url)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to fetch paper: {exc}") from exc
 
-    result = await run_full_ingestion(paper_meta, db)
-    return IngestResponse(paper_id=result["paper_id"], knowledge_object=result["knowledge_object"])
+    result = await run_full_ingestion(paper_meta, db, background_tasks)
+    return IngestResponse(
+        paper_id=result["paper_id"],
+        knowledge_object=result["knowledge_object"],
+        from_cache=result["from_cache"],
+    )
 
 
 @router.post("/ingest/abstract", response_model=IngestResponse)
-async def ingest_abstract(request: IngestAbstractRequest, db: AsyncSession = Depends(get_db)):
+async def ingest_abstract(
+    request: IngestAbstractRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     import hashlib
 
     paper_id = hashlib.sha256(request.title.encode()).hexdigest()[:16]
 
     if await paper_exists(paper_id, db):
         existing = await get_paper(paper_id, db)
-        return IngestResponse(paper_id=paper_id, knowledge_object=existing["knowledge_obj"])
+        return IngestResponse(
+            paper_id=paper_id,
+            knowledge_object=existing["knowledge_obj"],
+            from_cache=True,
+        )
 
     paper_meta = {
         "id": paper_id,
@@ -109,9 +137,9 @@ async def ingest_abstract(request: IngestAbstractRequest, db: AsyncSession = Dep
         "pdf_url": "",
         "arxiv_url": "",
     }
-    extracted = extract_knowledge(request.abstract)
-    embeddings = embed_knowledge_object(extracted, request.title)
-    await save_paper(paper_meta, extracted, embeddings, db)
+    extracted = await extract_knowledge(request.abstract)
+    embeddings = await embed_knowledge_object(extracted, request.title)
+    await save_paper(paper_meta, extracted, embeddings, request.abstract, db)
 
     await link_by_citation(paper_id, extracted.get("related_work", []), db)
     await link_by_method(paper_id, extracted.get("methods", []), embeddings["methods"], db)
@@ -119,12 +147,16 @@ async def ingest_abstract(request: IngestAbstractRequest, db: AsyncSession = Dep
     await detect_contradictions(paper_id, extracted.get("benchmarks", []), db)
     await check_hypotheses_for_paper(paper_id, extracted, db)
 
-    return IngestResponse(paper_id=paper_id, knowledge_object=extracted)
+    return IngestResponse(paper_id=paper_id, knowledge_object=extracted, from_cache=False)
 
 
 @router.get("/papers")
-async def list_all_papers(db: AsyncSession = Depends(get_db)):
-    return await list_papers(db)
+async def list_all_papers(
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=100, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    return await list_papers(db, limit=limit, offset=offset)
 
 
 @router.get("/papers/{paper_id}")
@@ -160,7 +192,7 @@ async def get_contradictions():
 
 @router.get("/graph/full")
 async def get_full_graph(db: AsyncSession = Depends(get_db)):
-    papers = await list_papers(db)
+    papers = await list_papers(db, limit=500)
     from knowledge.store import get_all_links
     links = await get_all_links(db)
     return {"nodes": papers, "edges": links}
@@ -205,9 +237,7 @@ async def get_hypothesis_detail(hypothesis_id: str, db: AsyncSession = Depends(g
 
 
 @router.get("/benchmarks/drift")
-async def benchmark_drift(
-    dataset: str, metric: str, db: AsyncSession = Depends(get_db)
-):
+async def benchmark_drift(dataset: str, metric: str, db: AsyncSession = Depends(get_db)):
     return await get_drift_series(dataset, metric, db)
 
 

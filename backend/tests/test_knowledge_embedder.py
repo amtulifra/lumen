@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -44,19 +44,27 @@ class TestCosineSimilarity:
 
 
 class TestEmbedText:
-    def test_returns_list_of_floats(self):
-        with patch("knowledge.embedder.client") as mock_client:
-            mock_client.embeddings.create.return_value = make_openai_embedding_response([FAKE_EMBEDDING])
-            result = embed_text("some text")
+    async def test_returns_list_of_floats(self):
+        with patch("knowledge.embedder._client") as mock_factory:
+            mock_client = MagicMock()
+            mock_factory.return_value = mock_client
+            mock_client.embeddings.create = AsyncMock(
+                return_value=make_openai_embedding_response([FAKE_EMBEDDING])
+            )
+            result = await embed_text("some text")
 
         assert isinstance(result, list)
         assert len(result) == 1536
         assert all(isinstance(x, float) for x in result)
 
-    def test_calls_api_with_correct_model(self):
-        with patch("knowledge.embedder.client") as mock_client:
-            mock_client.embeddings.create.return_value = make_openai_embedding_response([FAKE_EMBEDDING])
-            embed_text("text")
+    async def test_calls_api_with_correct_model(self):
+        with patch("knowledge.embedder._client") as mock_factory:
+            mock_client = MagicMock()
+            mock_factory.return_value = mock_client
+            mock_client.embeddings.create = AsyncMock(
+                return_value=make_openai_embedding_response([FAKE_EMBEDDING])
+            )
+            await embed_text("text")
 
         call_kwargs = mock_client.embeddings.create.call_args.kwargs
         assert call_kwargs["model"] == "text-embedding-3-small"
@@ -64,57 +72,73 @@ class TestEmbedText:
 
 
 class TestEmbedTexts:
-    def test_empty_list_returns_empty(self):
-        result = embed_texts([])
+    async def test_empty_list_returns_empty(self):
+        result = await embed_texts([])
         assert result == []
 
-    def test_returns_one_embedding_per_text(self):
+    async def test_returns_one_embedding_per_text(self):
         texts = ["text a", "text b", "text c"]
         fake_embeddings = [FAKE_EMBEDDING] * 3
 
-        with patch("knowledge.embedder.client") as mock_client:
-            mock_client.embeddings.create.return_value = make_openai_embedding_response(fake_embeddings)
-            result = embed_texts(texts)
+        with patch("knowledge.embedder._client") as mock_factory:
+            mock_client = MagicMock()
+            mock_factory.return_value = mock_client
+            mock_client.embeddings.create = AsyncMock(
+                return_value=make_openai_embedding_response(fake_embeddings)
+            )
+            result = await embed_texts(texts)
 
         assert len(result) == 3
 
-    def test_single_api_call_for_batch(self):
+    async def test_single_api_call_for_batch(self):
         texts = ["a", "b", "c"]
         fake_embeddings = [FAKE_EMBEDDING] * 3
 
-        with patch("knowledge.embedder.client") as mock_client:
-            mock_client.embeddings.create.return_value = make_openai_embedding_response(fake_embeddings)
-            embed_texts(texts)
+        with patch("knowledge.embedder._client") as mock_factory:
+            mock_client = MagicMock()
+            mock_factory.return_value = mock_client
+            mock_client.embeddings.create = AsyncMock(
+                return_value=make_openai_embedding_response(fake_embeddings)
+            )
+            await embed_texts(texts)
 
         assert mock_client.embeddings.create.call_count == 1
 
 
 class TestEmbedKnowledgeObject:
-    def test_returns_all_required_keys(self):
+    async def test_returns_all_required_keys(self):
         num_claims = len(FAKE_EXTRACTED["claims"])
         num_methods = len(FAKE_EXTRACTED["methods"])
         num_problems = len(FAKE_EXTRACTED["open_problems"])
 
-        with patch("knowledge.embedder.client") as mock_client:
-            mock_client.embeddings.create.side_effect = [
-                make_openai_embedding_response([FAKE_EMBEDDING]),
-                make_openai_embedding_response([FAKE_EMBEDDING] * num_claims),
-                make_openai_embedding_response([FAKE_EMBEDDING] * num_methods),
-                make_openai_embedding_response([FAKE_EMBEDDING] * num_problems),
-            ]
-            result = embed_knowledge_object(FAKE_EXTRACTED, "Test Title")
+        with patch("knowledge.embedder._client") as mock_factory:
+            mock_client = MagicMock()
+            mock_factory.return_value = mock_client
+            mock_client.embeddings.create = AsyncMock(
+                side_effect=[
+                    make_openai_embedding_response([FAKE_EMBEDDING]),
+                    make_openai_embedding_response([FAKE_EMBEDDING] * num_claims),
+                    make_openai_embedding_response([FAKE_EMBEDDING] * num_methods),
+                    make_openai_embedding_response([FAKE_EMBEDDING] * num_problems),
+                ]
+            )
+            result = await embed_knowledge_object(FAKE_EXTRACTED, "Test Title")
 
         assert "title" in result
         assert "claims" in result
         assert "methods" in result
         assert "open_problems" in result
 
-    def test_empty_extracted_does_not_crash(self):
+    async def test_empty_extracted_does_not_crash(self):
         empty_extracted = {"claims": [], "methods": [], "open_problems": []}
 
-        with patch("knowledge.embedder.client") as mock_client:
-            mock_client.embeddings.create.return_value = make_openai_embedding_response([FAKE_EMBEDDING])
-            result = embed_knowledge_object(empty_extracted, "Title")
+        with patch("knowledge.embedder._client") as mock_factory:
+            mock_client = MagicMock()
+            mock_factory.return_value = mock_client
+            mock_client.embeddings.create = AsyncMock(
+                return_value=make_openai_embedding_response([FAKE_EMBEDDING])
+            )
+            result = await embed_knowledge_object(empty_extracted, "Title")
 
         assert result["claims"] == []
         assert result["methods"] == []

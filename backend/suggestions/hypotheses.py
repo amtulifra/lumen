@@ -12,7 +12,7 @@ from knowledge.embedder import embed_text
 
 async def create_hypothesis(hypothesis_text: str, db: AsyncSession) -> str:
     hypothesis_id = str(uuid.uuid4())
-    embedding = embed_text(hypothesis_text)
+    embedding = await embed_text(hypothesis_text)
     now = datetime.now(timezone.utc)
 
     await db.execute(
@@ -50,8 +50,8 @@ async def get_hypothesis(hypothesis_id: str, db: AsyncSession) -> dict | None:
     return dict(row) if row else None
 
 
-def judge_evidence(hypothesis_text: str, claim_text: str, paper_title: str) -> str:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+async def judge_evidence(hypothesis_text: str, claim_text: str, paper_title: str) -> str:
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     prompt = (
         f"Hypothesis: {hypothesis_text}\n\n"
         f"Paper: {paper_title}\n"
@@ -59,7 +59,7 @@ def judge_evidence(hypothesis_text: str, claim_text: str, paper_title: str) -> s
         "Does this finding support, refute, or give mixed evidence for the hypothesis? "
         "Answer with exactly one word: supports, refutes, or mixed."
     )
-    message = client.messages.create(
+    message = await client.messages.create(
         model=settings.claude_model,
         max_tokens=10,
         messages=[{"role": "user", "content": prompt}],
@@ -84,7 +84,7 @@ async def check_hypotheses_for_paper(paper_id: str, extracted: dict, db: AsyncSe
         if not claim_text:
             continue
 
-        claim_embedding = embed_text(claim_text)
+        claim_embedding = await embed_text(claim_text)
 
         rows = await db.execute(
             text(
@@ -100,7 +100,7 @@ async def check_hypotheses_for_paper(paper_id: str, extracted: dict, db: AsyncSe
         )
 
         for row in rows.all():
-            verdict = judge_evidence(row.text, claim_text, paper_title)
+            verdict = await judge_evidence(row.text, claim_text, paper_title)
             evidence_entry = {
                 "paper_id": paper_id,
                 "claim_text": claim_text,

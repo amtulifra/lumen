@@ -9,9 +9,9 @@ CHARS_PER_TOKEN = 4
 MAX_CHARS = 12000 * CHARS_PER_TOKEN
 
 
-def download_pdf(url: str) -> bytes:
-    with httpx.Client(follow_redirects=True, timeout=60) as client:
-        response = client.get(url)
+async def download_pdf(url: str) -> bytes:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
+        response = await client.get(url)
         response.raise_for_status()
         return response.content
 
@@ -71,8 +71,8 @@ def truncate_to_budget(text: str) -> str:
     return separator.join(result_parts)
 
 
-def extract_paper_text(pdf_url: str) -> str:
-    pdf_bytes = download_pdf(pdf_url)
+async def extract_paper_text(pdf_url: str) -> str:
+    pdf_bytes = await download_pdf(pdf_url)
     raw = extract_text(pdf_bytes)
     cleaned = clean_text(raw)
     return truncate_to_budget(cleaned)

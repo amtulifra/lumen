@@ -61,6 +61,7 @@ class PaperOut(BaseModel):
 class IngestResponse(BaseModel):
     paper_id: str
     knowledge_object: dict
+    from_cache: bool = False
 
 
 class LinkOut(BaseModel):

@@ -8,14 +8,12 @@ from tests.conftest import FAKE_EMBEDDING, make_mock_db, make_mock_result
 
 
 class TestFetchMethodGaps:
-    @pytest.mark.asyncio
     async def test_returns_empty_for_no_paper_ids(self):
         db = make_mock_db()
         result = await fetch_method_gaps([], FAKE_EMBEDDING, db)
         assert result == []
         db.execute.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_returns_name_description_pairs(self):
         db = make_mock_db()
 
@@ -30,7 +28,6 @@ class TestFetchMethodGaps:
         assert "Sparse Attention" in result[0]
         assert "Attends to only a subset of tokens." in result[0]
 
-    @pytest.mark.asyncio
     async def test_uses_parameterized_query(self):
         db = make_mock_db()
         db.execute.return_value = make_mock_result([])
@@ -48,7 +45,6 @@ class TestFetchMethodGaps:
 
 
 class TestFetchRelevantPapers:
-    @pytest.mark.asyncio
     async def test_returns_paper_dicts(self):
         db = make_mock_db()
 
@@ -64,7 +60,6 @@ class TestFetchRelevantPapers:
         assert result[0]["id"] == "paper_1"
         assert result[0]["title"] == "Attention Is All You Need"
 
-    @pytest.mark.asyncio
     async def test_returns_empty_when_no_papers(self):
         db = make_mock_db()
         db.execute.return_value = make_mock_result([])
@@ -74,7 +69,6 @@ class TestFetchRelevantPapers:
 
 
 class TestGenerateSuggestions:
-    @pytest.mark.asyncio
     async def test_returns_suggestions_and_relevant_papers(self):
         db = make_mock_db()
 
@@ -88,16 +82,16 @@ class TestGenerateSuggestions:
         ]
 
         with (
-            patch("suggestions.frontier.embed_text", return_value=FAKE_EMBEDDING),
+            patch("suggestions.frontier.embed_text", new_callable=AsyncMock, return_value=FAKE_EMBEDDING),
             patch("suggestions.frontier.fetch_relevant_papers", new_callable=AsyncMock, return_value=[{"id": "p1", "title": "Paper"}]),
             patch("suggestions.frontier.fetch_relevant_open_problems", new_callable=AsyncMock, return_value=["Problem A"]),
             patch("suggestions.frontier.fetch_method_gaps", new_callable=AsyncMock, return_value=["Method B: desc"]),
-            patch("suggestions.frontier.anthropic.Anthropic") as mock_anthropic,
+            patch("suggestions.frontier.anthropic.AsyncAnthropic") as mock_cls,
         ):
             mock_client = MagicMock()
-            mock_anthropic.return_value = mock_client
-            mock_client.messages.create.return_value = MagicMock(
-                content=[MagicMock(text=json.dumps(fake_suggestions))]
+            mock_cls.return_value = mock_client
+            mock_client.messages.create = AsyncMock(
+                return_value=MagicMock(content=[MagicMock(text=json.dumps(fake_suggestions))])
             )
 
             result = await generate_suggestions("I want to work on efficient attention.", db)
@@ -107,22 +101,21 @@ class TestGenerateSuggestions:
         assert len(result["suggestions"]) == 1
         assert result["suggestions"][0]["difficulty"] == "1-month project"
 
-    @pytest.mark.asyncio
     async def test_prompt_includes_user_notes(self):
         db = make_mock_db()
         user_notes = "I am thinking about sparse attention for long documents."
 
         with (
-            patch("suggestions.frontier.embed_text", return_value=FAKE_EMBEDDING),
+            patch("suggestions.frontier.embed_text", new_callable=AsyncMock, return_value=FAKE_EMBEDDING),
             patch("suggestions.frontier.fetch_relevant_papers", new_callable=AsyncMock, return_value=[]),
             patch("suggestions.frontier.fetch_relevant_open_problems", new_callable=AsyncMock, return_value=[]),
             patch("suggestions.frontier.fetch_method_gaps", new_callable=AsyncMock, return_value=[]),
-            patch("suggestions.frontier.anthropic.Anthropic") as mock_anthropic,
+            patch("suggestions.frontier.anthropic.AsyncAnthropic") as mock_cls,
         ):
             mock_client = MagicMock()
-            mock_anthropic.return_value = mock_client
-            mock_client.messages.create.return_value = MagicMock(
-                content=[MagicMock(text="[]")]
+            mock_cls.return_value = mock_client
+            mock_client.messages.create = AsyncMock(
+                return_value=MagicMock(content=[MagicMock(text="[]")])
             )
 
             await generate_suggestions(user_notes, db)
