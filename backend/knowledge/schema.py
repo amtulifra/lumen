@@ -1,7 +1,8 @@
+# Reference schema — documents the canonical shape of a KnowledgeObject.
+# The pipeline uses plain dicts matching these fields; these dataclasses
+# serve as the authoritative type specification.
+
 from dataclasses import dataclass, field
-
-import numpy as np
-
 
 @dataclass
 class Claim:
@@ -68,8 +69,8 @@ class KnowledgeObject:
     related_work: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
 
-    claim_embeddings: np.ndarray = field(default_factory=lambda: np.array([]))
-    method_embeddings: np.ndarray = field(default_factory=lambda: np.array([]))
+    claim_embeddings: list[list[float]] = field(default_factory=list)
+    method_embeddings: list[list[float]] = field(default_factory=list)
 
     cites: list[str] = field(default_factory=list)
     cited_by: list[str] = field(default_factory=list)

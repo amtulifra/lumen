@@ -107,3 +107,17 @@ class BenchmarkDriftPoint(BaseModel):
 class RSSStatusOut(BaseModel):
     feeds: list[str]
     schedule: str
+
+
+class RSSSubscriptionRequest(BaseModel):
+    category: str
+    url: str
+
+
+class NotificationOut(BaseModel):
+    id: str
+    type: str
+    message: str
+    payload: dict
+    read: bool
+    created_at: str

@@ -34,6 +34,38 @@ interface KnowledgeObject {
   keywords: string[];
 }
 
+interface ClaimScore {
+  claim_id: string;
+  text: string;
+  extraction_confidence: number;
+  replication_score: number;
+  supported_by: number;
+  challenged_by: number;
+  refined_by: number;
+}
+
+interface MissingExperiment {
+  dataset: string;
+  metric: string;
+  run_by: string[];
+}
+
+interface ContaminationWarning {
+  dataset: string;
+  metric: string;
+  value: number;
+  issues: string[];
+  criticism: string;
+}
+
+interface RabbitHolePaper {
+  id: string;
+  title: string;
+  year: number;
+  arxiv_url: string;
+  link_type?: string;
+}
+
 interface Paper {
   id: string;
   title: string;
@@ -45,7 +77,9 @@ interface Paper {
 
 interface PaperLink {
   source_id: string;
+  source_title: string;
   target_id: string;
+  target_title: string;
   link_type: string;
   strength: number;
   metadata: Record<string, unknown>;
@@ -66,6 +100,9 @@ export default function PaperPage({ params }: { params: Promise<{ id: string }> 
   const { data: paper } = useSWR(`paper-${id}`, () => api.getPaper(id));
   const { data: links } = useSWR(`links-${id}`, () => api.getPaperLinks(id));
   const { data: researchers } = useSWR(`researchers-${id}`, () => api.getPaperResearchers(id));
+  const { data: claimScores } = useSWR(`claim-scores-${id}`, () => api.getPaperClaimScores(id));
+  const { data: missingData } = useSWR(`missing-${id}`, () => api.getMissingExperiments(id));
+  const { data: contamination } = useSWR(`contamination-${id}`, () => api.getPaperContaminationWarnings(id));
 
   if (!paper) {
     return <p className="text-xs text-muted">loading...</p>;
@@ -75,6 +112,10 @@ export default function PaperPage({ params }: { params: Promise<{ id: string }> 
   const ko = p.knowledge_obj;
   const paperLinks = (links as PaperLink[]) ?? [];
   const authorProfiles = (researchers as Researcher[]) ?? [];
+  const scores = (claimScores as ClaimScore[]) ?? [];
+  const scoreMap = Object.fromEntries(scores.map((s) => [s.text, s]));
+  const missingExperiments = (missingData as { missing_benchmarks: MissingExperiment[] })?.missing_benchmarks ?? [];
+  const contaminationWarnings = (contamination as ContaminationWarning[]) ?? [];
 
   const linksByType = paperLinks.reduce<Record<string, PaperLink[]>>((acc, link) => {
     acc[link.link_type] = [...(acc[link.link_type] ?? []), link];
@@ -104,16 +145,32 @@ export default function PaperPage({ params }: { params: Promise<{ id: string }> 
       )}
 
       <Section title="Claims">
-        {ko?.claims?.map((claim, i) => (
-          <div key={i} className="border-l-2 border-border pl-4 space-y-1">
-            <p className="text-sm text-text">{claim.text}</p>
-            <div className="flex items-center gap-3">
-              <ConfidenceBar value={claim.confidence} />
-              <span className="text-xs text-accent">{(claim.confidence * 100).toFixed(0)}%</span>
+        {ko?.claims?.map((claim, i) => {
+          const score = scoreMap[claim.text];
+          return (
+            <div key={i} className="border-l-2 border-border pl-4 space-y-1">
+              <p className="text-sm text-text">{claim.text}</p>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted">confidence</span>
+                  <ConfidenceBar value={claim.confidence} />
+                  <span className="text-xs text-accent">{(claim.confidence * 100).toFixed(0)}%</span>
+                </div>
+                {score && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted">replication</span>
+                    <ConfidenceBar value={score.replication_score} color={score.challenged_by > 0 ? "warning" : "accent"} />
+                    <span className="text-xs text-accent">{score.supported_by}✓</span>
+                    {score.challenged_by > 0 && (
+                      <span className="text-xs text-red-400">{score.challenged_by}✗</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted italic">{claim.evidence}</p>
             </div>
-            <p className="text-xs text-muted italic">{claim.evidence}</p>
-          </div>
-        ))}
+          );
+        })}
       </Section>
 
       <Section title="Methods">
@@ -130,6 +187,19 @@ export default function PaperPage({ params }: { params: Promise<{ id: string }> 
         ))}
       </Section>
 
+      {contaminationWarnings.length > 0 && (
+        <div className="border border-yellow-800 bg-yellow-950/20 rounded p-3 space-y-2">
+          <p className="text-xs font-semibold text-yellow-500 uppercase tracking-widest">Benchmark Quality Warnings</p>
+          {contaminationWarnings.map((w, i) => (
+            <div key={i} className="text-xs">
+              <span className="text-yellow-400 font-medium">{w.dataset}</span>
+              <span className="text-muted"> — {w.issues.join(", ")}</span>
+              <p className="text-muted mt-0.5">{w.criticism}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <Section title="Benchmarks">
         <table className="w-full text-xs">
           <thead>
@@ -142,18 +212,39 @@ export default function PaperPage({ params }: { params: Promise<{ id: string }> 
             </tr>
           </thead>
           <tbody>
-            {ko?.benchmarks?.map((bm, i) => (
-              <tr key={i} className="border-b border-border last:border-0">
-                <td className="py-1.5 text-text">{bm.dataset}</td>
-                <td className="py-1.5 text-muted">{bm.metric}</td>
-                <td className="py-1.5 text-muted">{bm.model}</td>
-                <td className="py-1.5 text-muted">{bm.split}</td>
-                <td className="py-1.5 text-right text-accent">{bm.value}</td>
-              </tr>
-            ))}
+            {ko?.benchmarks?.map((bm, i) => {
+              const hasWarning = contaminationWarnings.some((w) => w.dataset === bm.dataset);
+              return (
+                <tr key={i} className="border-b border-border last:border-0">
+                  <td className={`py-1.5 ${hasWarning ? "text-yellow-400" : "text-text"}`}>
+                    {bm.dataset}{hasWarning && " ⚠"}
+                  </td>
+                  <td className="py-1.5 text-muted">{bm.metric}</td>
+                  <td className="py-1.5 text-muted">{bm.model}</td>
+                  <td className="py-1.5 text-muted">{bm.split}</td>
+                  <td className="py-1.5 text-right text-accent">{bm.value}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Section>
+
+      {missingExperiments.length > 0 && (
+        <Section title="Missing Experiments">
+          <p className="text-xs text-muted">Competing papers evaluate on these benchmarks — this paper does not:</p>
+          <div className="space-y-2 mt-2">
+            {missingExperiments.map((m, i) => (
+              <div key={i} className="flex items-start justify-between text-xs">
+                <span className="text-text font-medium">{m.dataset} / {m.metric}</span>
+                <span className="text-muted text-right max-w-[50%] truncate" title={m.run_by.join(", ")}>
+                  {m.run_by.slice(0, 2).join(", ")}{m.run_by.length > 2 ? ` +${m.run_by.length - 2}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {ko?.limitations?.length > 0 && (
         <Section title="Limitations">
@@ -179,10 +270,11 @@ export default function PaperPage({ params }: { params: Promise<{ id: string }> 
         <Section key={type} title={`Linked: ${type.toLowerCase().replace("_", " ")}`}>
           {typeLinks.map((link, i) => {
             const otherId = link.source_id === id ? link.target_id : link.source_id;
+            const otherTitle = link.source_id === id ? link.target_title : link.source_title;
             return (
               <div key={i} className="flex items-center justify-between text-xs">
                 <Link href={`/paper/${otherId}`} className="text-text hover:text-accent transition-colors">
-                  {otherId}
+                  {otherTitle ?? otherId}
                 </Link>
                 {link.metadata && Object.keys(link.metadata).length > 0 && (
                   <span className="text-muted">
@@ -233,12 +325,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function ConfidenceBar({ value }: { value: number }) {
+function ConfidenceBar({ value, color = "accent" }: { value: number; color?: string }) {
+  const colorClass = color === "warning" ? "bg-yellow-500" : "bg-accent";
   return (
     <div className="w-24 h-1 bg-border rounded-full overflow-hidden">
       <div
-        className="h-full bg-accent rounded-full"
-        style={{ width: `${value * 100}%` }}
+        className={`h-full ${colorClass} rounded-full`}
+        style={{ width: `${Math.min(value * 100, 100)}%` }}
       />
     </div>
   );

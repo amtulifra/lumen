@@ -92,6 +92,7 @@ class TestCheckHypothesesForPaper:
         with (
             patch("suggestions.hypotheses.embed_text", new_callable=AsyncMock, return_value=FAKE_EMBEDDING),
             patch("suggestions.hypotheses.judge_evidence", new_callable=AsyncMock, return_value="supports"),
+            patch("suggestions.hypotheses.create_notification", new_callable=AsyncMock),
         ):
             await check_hypotheses_for_paper("paper_id", extracted, db)
 

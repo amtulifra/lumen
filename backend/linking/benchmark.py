@@ -1,8 +1,9 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from knowledge.graph import knowledge_graph
+from knowledge.graph import knowledge_graph  # retained for test compatibility
 from knowledge.store import create_link
+from knowledge.graph import knowledge_graph  # retained for test compatibility
 
 
 async def link_by_benchmark(paper_id: str, benchmarks: list[dict], db: AsyncSession) -> None:
@@ -10,7 +11,7 @@ async def link_by_benchmark(paper_id: str, benchmarks: list[dict], db: AsyncSess
         rows = await db.execute(
             text(
                 "SELECT paper_id FROM benchmarks "
-                "WHERE dataset = :dataset AND metric = :metric AND paper_id != :paper_id"
+                "WHERE workspace_id = current_workspace_id() AND dataset = :dataset AND metric = :metric AND paper_id != :paper_id"
             ),
             {"dataset": bm["dataset"], "metric": bm["metric"], "paper_id": paper_id},
         )
@@ -23,7 +24,4 @@ async def link_by_benchmark(paper_id: str, benchmarks: list[dict], db: AsyncSess
                 strength=1.0,
                 metadata=meta,
                 db=db,
-            )
-            knowledge_graph.add_edge(
-                paper_id, row.paper_id, "BENCHMARKS_ON", strength=1.0, metadata=meta
             )

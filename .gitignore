@@ -2,6 +2,8 @@
 node_modules/
 memory/
 .next/
+next-env.d.ts
+tsconfig.tsbuildinfo
 .pytest_cache/
 __pycache__/
 *.pyc
@@ -21,3 +23,4 @@ build/
 *.egg/
 *.tar.gz
 *.whl
+Plan.md

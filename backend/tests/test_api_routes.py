@@ -1,4 +1,3 @@
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,10 +16,17 @@ def make_test_app():
 
 
 @pytest.fixture
-def client():
+def client(mock_db):
     app = make_test_app()
+    from database import get_db
+
+    async def override_get_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = override_get_db
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -46,7 +52,9 @@ class TestIngestURL:
             patch("api.routes.link_by_benchmark", new_callable=AsyncMock),
             patch("api.routes.detect_contradictions", new_callable=AsyncMock),
             patch("api.routes.check_hypotheses_for_paper", new_callable=AsyncMock),
-            patch("api.routes.get_db", return_value=mock_db),
+            patch("api.routes.build_claim_lineage", new_callable=AsyncMock),
+            patch("api.routes.record_event", new_callable=AsyncMock),
+            patch("api.routes._build_author_profiles", new_callable=AsyncMock),
         ):
             response = client.post("/ingest", json={"url": "https://arxiv.org/abs/1706.03762"})
 
@@ -70,7 +78,6 @@ class TestIngestURL:
             patch("api.routes.fetch_paper", return_value=FAKE_PAPER_META),
             patch("api.routes.paper_exists", new_callable=AsyncMock, return_value=True),
             patch("api.routes.get_paper", new_callable=AsyncMock, return_value=cached_paper),
-            patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.post("/ingest", json={"url": "https://arxiv.org/abs/1706.03762"})
 
@@ -94,7 +101,6 @@ class TestGetPaper:
 
         with (
             patch("api.routes.get_paper", new_callable=AsyncMock, return_value=paper_data),
-            patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.get(f"/papers/{FAKE_PAPER_ID}")
 
@@ -104,7 +110,6 @@ class TestGetPaper:
     def test_returns_404_when_not_found(self, client, mock_db):
         with (
             patch("api.routes.get_paper", new_callable=AsyncMock, return_value=None),
-            patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.get("/papers/does_not_exist")
 
@@ -114,7 +119,7 @@ class TestGetPaper:
 class TestSubgraph:
     def test_valid_depth_returns_subgraph(self, client):
         with patch("api.routes.knowledge_graph") as mock_graph:
-            mock_graph.subgraph.return_value = {"nodes": [{"id": "a"}], "edges": []}
+            mock_graph.subgraph_db = AsyncMock(return_value={"nodes": [{"id": "a"}], "edges": []})
             response = client.get(f"/graph/subgraph/{FAKE_PAPER_ID}?depth=2")
 
         assert response.status_code == 200
@@ -132,7 +137,6 @@ class TestHypotheses:
     def test_create_hypothesis_returns_id(self, client, mock_db):
         with (
             patch("api.routes.create_hypothesis", new_callable=AsyncMock, return_value="hyp_123"),
-            patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.post("/hypotheses", json={"text": "Sparse attention is sufficient."})
 
@@ -142,7 +146,6 @@ class TestHypotheses:
     def test_get_hypothesis_returns_404_when_missing(self, client, mock_db):
         with (
             patch("api.routes.get_hypothesis", new_callable=AsyncMock, return_value=None),
-            patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.get("/hypotheses/nonexistent_id")
 
@@ -155,7 +158,6 @@ class TestHypotheses:
 
         with (
             patch("api.routes.list_hypotheses", new_callable=AsyncMock, return_value=fake_hypotheses),
-            patch("api.routes.get_db", return_value=mock_db),
         ):
             response = client.get("/hypotheses")
 

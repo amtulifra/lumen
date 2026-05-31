@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-FAKE_EMBEDDING = [0.1] * 1536
+FAKE_EMBEDDING = [0.1] * 384
 FAKE_PAPER_ID = "2305.12345"
 
 FAKE_EXTRACTED = {

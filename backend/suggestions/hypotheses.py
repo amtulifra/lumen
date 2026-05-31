@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from knowledge.embedder import embed_text
+from knowledge.memory import record_event
+from notifications import create_notification
 
 
 async def create_hypothesis(hypothesis_text: str, db: AsyncSession) -> str:
@@ -28,12 +30,20 @@ async def create_hypothesis(hypothesis_text: str, db: AsyncSession) -> str:
         },
     )
     await db.commit()
+
+    await record_event(
+        event_type="hypothesis_created",
+        subject_id=hypothesis_id,
+        subject_type="hypothesis",
+        content=f"New hypothesis created: {hypothesis_text}",
+        db=db,
+    )
     return hypothesis_id
 
 
 async def list_hypotheses(db: AsyncSession) -> list[dict]:
     result = await db.execute(
-        text("SELECT id, text, status, evidence_for, evidence_against, created_at, updated_at FROM hypotheses ORDER BY created_at DESC")
+        text("SELECT id, text, status, evidence_for, evidence_against, created_at, updated_at FROM hypotheses WHERE workspace_id = current_workspace_id() ORDER BY created_at DESC")
     )
     return [dict(row) for row in result.mappings().all()]
 
@@ -42,7 +52,7 @@ async def get_hypothesis(hypothesis_id: str, db: AsyncSession) -> dict | None:
     result = await db.execute(
         text(
             "SELECT id, text, status, evidence_for, evidence_against, created_at, updated_at "
-            "FROM hypotheses WHERE id = :id"
+            "FROM hypotheses WHERE workspace_id = current_workspace_id() AND id = :id"
         ),
         {"id": hypothesis_id},
     )
@@ -72,7 +82,7 @@ async def judge_evidence(hypothesis_text: str, claim_text: str, paper_title: str
 
 async def check_hypotheses_for_paper(paper_id: str, extracted: dict, db: AsyncSession) -> None:
     paper_result = await db.execute(
-        text("SELECT title FROM papers WHERE id = :id"),
+        text("SELECT title FROM papers WHERE workspace_id = current_workspace_id() AND id = :id"),
         {"id": paper_id},
     )
     paper_row = paper_result.mappings().one_or_none()
@@ -91,7 +101,8 @@ async def check_hypotheses_for_paper(paper_id: str, extracted: dict, db: AsyncSe
                 "SELECT id, text, status, evidence_for, evidence_against, "
                 "1 - (embedding <=> CAST(:emb AS vector)) AS similarity "
                 "FROM hypotheses "
-                "WHERE 1 - (embedding <=> CAST(:emb AS vector)) > :threshold"
+                "WHERE workspace_id = current_workspace_id() "
+                "AND 1 - (embedding <=> CAST(:emb AS vector)) > :threshold"
             ),
             {
                 "emb": json.dumps(claim_embedding),
@@ -123,7 +134,7 @@ async def check_hypotheses_for_paper(paper_id: str, extracted: dict, db: AsyncSe
             await db.execute(
                 text(
                     "UPDATE hypotheses SET evidence_for=:ef, evidence_against=:ea, "
-                    "status=:status, updated_at=:now WHERE id=:id"
+                    "status=:status, updated_at=:now WHERE workspace_id = current_workspace_id() AND id=:id"
                 ),
                 {
                     "ef": json.dumps(evidence_for),
@@ -133,6 +144,38 @@ async def check_hypotheses_for_paper(paper_id: str, extracted: dict, db: AsyncSe
                     "id": row.id,
                 },
             )
+
+            label = "supports" if verdict == "supports" else "contradicts" if verdict == "refutes" else "relates to"
+            short_hyp = row.text[:80] + ("…" if len(row.text) > 80 else "")
+            await create_notification(
+                type="hypothesis_evidence",
+                message=f'New paper {label} your hypothesis: "{short_hyp}"',
+                payload={"hypothesis_id": row.id, "paper_id": paper_id, "verdict": verdict},
+                db=db,
+            )
+
+            await record_event(
+                event_type="evidence_found",
+                subject_id=str(row.id),
+                subject_type="hypothesis",
+                content=(
+                    f'Paper (id={paper_id}) {label} hypothesis: "{short_hyp}" '
+                    f'— claim: "{claim_text[:120]}"'
+                ),
+                db=db,
+            )
+
+            if new_status != row.status:
+                await record_event(
+                    event_type="belief_changed",
+                    subject_id=str(row.id),
+                    subject_type="hypothesis",
+                    content=(
+                        f'Hypothesis status changed from "{row.status}" to "{new_status}": '
+                        f'"{short_hyp}"'
+                    ),
+                    db=db,
+                )
 
     await db.commit()
 

@@ -9,7 +9,8 @@ async def get_drift_series(dataset: str, metric: str, db: AsyncSession) -> list[
             "bd.model, bd.paper_id, p.title "
             "FROM benchmark_drift bd "
             "JOIN papers p ON bd.paper_id = p.id "
-            "WHERE bd.dataset = :dataset AND bd.metric = :metric "
+            "WHERE bd.workspace_id = current_workspace_id() "
+            "AND bd.dataset = :dataset AND bd.metric = :metric "
             "GROUP BY bd.year, bd.model, bd.paper_id, p.title "
             "ORDER BY bd.year ASC"
         ),
@@ -30,7 +31,8 @@ async def get_drift_series(dataset: str, metric: str, db: AsyncSession) -> list[
 async def list_tracked_datasets(db: AsyncSession) -> list[dict]:
     rows = await db.execute(
         text(
-            "SELECT DISTINCT dataset, metric FROM benchmark_drift ORDER BY dataset, metric"
+            "SELECT DISTINCT dataset, metric FROM benchmark_drift "
+            "WHERE workspace_id = current_workspace_id() ORDER BY dataset, metric"
         )
     )
     return [{"dataset": r.dataset, "metric": r.metric} for r in rows.all()]
@@ -42,7 +44,8 @@ async def get_current_sota(dataset: str, metric: str, db: AsyncSession) -> dict 
             "SELECT bd.model, bd.value, p.title, p.id AS paper_id "
             "FROM benchmark_drift bd "
             "JOIN papers p ON bd.paper_id = p.id "
-            "WHERE bd.dataset = :dataset AND bd.metric = :metric "
+            "WHERE bd.workspace_id = current_workspace_id() "
+            "AND bd.dataset = :dataset AND bd.metric = :metric "
             "ORDER BY bd.value DESC "
             "LIMIT 1"
         ),

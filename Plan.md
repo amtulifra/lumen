@@ -38,7 +38,7 @@ indexed, linked, diffed, and queried programmatically.
 
 ---
 
-## Improvements Over Salma's Original lumen
+## Improvements 
 
 | # | Type | What | Why |
 |---|------|------|-----|
@@ -50,6 +50,49 @@ indexed, linked, diffed, and queried programmatically.
 | 6 | New | Method similarity linking | Embed method descriptions, link papers that share techniques even without explicit citations |
 | 7 | New | Open-problem extraction | Explicitly extract what each paper says it leaves for future work |
 | 8 | New | Claim confidence scoring | Score each extracted claim by how well-supported it is in the paper |
+
+---
+
+## Critique & Revised Priorities
+
+### What to cut or delay
+
+**GitHub cross-linking (Phase 8+)**
+Too many false positives. Author name ambiguity. Repos not maintained. Users came for
+papers and ideas, not author dashboards. Move to a late phase or drop entirely.
+
+**Researcher profiles (deprioritized)**
+This is rebuilding Semantic Scholar. Users care about claims, methods, and research
+directions — not h-index dashboards. Keep the data model but stop treating this as a
+core feature. Phase 7+.
+
+**NetworkX graph (keep for MVP, abstract the layer)**
+Fine now. But application logic must not depend on NetworkX internals directly. The
+graph layer needs a clean abstraction so Neo4j, Memgraph, or a Postgres graph extension
+can replace it without touching the rest of the codebase. Every `knowledge_graph.X`
+call should go through the `KnowledgeGraph` class — never import NetworkX outside it.
+
+### Biggest architectural risk
+
+The single-shot extraction prompt (claims + methods + benchmarks + limitations in one
+call) will produce inconsistent quality on long papers, survey papers, and
+benchmark-heavy papers. The fix is **specialized extractors** — one Claude call per
+extraction type, each with a focused prompt. Higher cost, much higher quality.
+
+### North-star feature: Research Memory
+
+After 200 papers, you should be able to ask:
+*"Why did I stop believing sparse attention was enough?"*
+
+Lumen answers:
+> In March 2026 you ingested Paper X. It contradicted Hypothesis H you had held for
+> 6 weeks. Papers Y and Z added supporting evidence for the contradiction. Your notes
+> shifted from A to B.
+
+This is not the papers. Not the graph. Not the summaries. **Your thinking, over time.**
+Nobody has built this well. This is the differentiator.
+
+---
 
 ---
 
@@ -760,6 +803,305 @@ Data fetching:  SWR
 
 ---
 
+## Phase 7 — Specialized Extractors
+**Priority: HIGH — do before scaling to more users**
+
+Replace the single-shot extraction prompt with one dedicated Claude call per extraction
+type. Each extractor gets a focused system prompt, a tighter output schema, and its own
+retry/validation logic.
+
+```
+PDF text
+  ├── ClaimExtractor     → claims[]      (text, confidence, evidence)
+  ├── MethodExtractor    → methods[]     (name, description, is_novel)
+  ├── BenchmarkExtractor → benchmarks[]  (dataset, metric, value, model, split)
+  ├── LimitationExtractor → limitations[]
+  └── OpenProblemExtractor → open_problems[]
+```
+
+**Why this matters:** A single long prompt degrades on multi-task papers, surveys, and
+benchmark-heavy papers. Dedicated extractors let you tune each prompt independently and
+catch failures per-type without losing everything.
+
+**Implementation:**
+- Split `extractor.py` into `extractors/claims.py`, `extractors/methods.py`, etc.
+- Run all 5 extractors with `asyncio.gather` — parallel, not sequential.
+- Validate output schema strictly per extractor; fall back to empty list on failure
+  rather than crashing the entire ingest.
+- Cost: ~5× Claude API calls per paper. Worth it.
+
+---
+
+## Phase 8 — Claim Intelligence
+**Priority: HIGH — the core scientific value of lumen**
+
+### Claim Evolution Tracking
+
+Track how a claim changes across papers over time:
+
+```
+Claim born (Paper A, 2022): "LoRA achieves 95% of full fine-tuning performance"
+  ↓ replicated (Paper B, 2023): "LoRA achieves 97% on code tasks"
+  ↓ challenged (Paper C, 2024): "LoRA degrades under distribution shift"
+  ↓ refined (Paper D, 2024): "LoRA + QLoRA resolves distribution shift issue"
+```
+
+**Schema additions:**
+```sql
+CREATE TABLE claim_lineage (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_claim_id UUID REFERENCES claims(id),
+    child_claim_id  UUID REFERENCES claims(id),
+    relation    TEXT,  -- 'replicates' | 'challenges' | 'refines' | 'extends'
+    confidence  FLOAT,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Logic:** After ingesting a new paper, embed each new claim and find similar claims
+from older papers (threshold ~0.82). Pass both claims to Claude: *"Does claim B
+replicate, challenge, refine, or extend claim A?"* Create a lineage edge.
+
+**API:** `GET /claims/{id}/lineage` → the full timeline for a claim.
+
+**Frontend:** Timeline view per claim — born → replicated → challenged → refined.
+
+### Replication Score
+
+For every claim, compute a truth signal:
+
+```python
+@dataclass
+class ClaimScore:
+    claim_id:   str
+    supported:  int   # papers that replicate or extend
+    challenged: int   # papers that contradict or challenge
+    neutral:    int   # papers that reference but don't confirm/deny
+    score:      float # supported / (supported + challenged + neutral)
+```
+
+Surface on the paper detail page: "This claim is supported by 7 papers and challenged
+by 2." Researchers would use this constantly.
+
+**API:** `GET /claims/{id}/score`
+
+---
+
+## Phase 9 — Research Rabbit Mode + Missing Experiment Detector
+**Priority: HIGH — killer demo, genuinely useful**
+
+### Research Rabbit Mode
+
+Input: one paper ID.
+
+Output: an explorable map of:
+- **Ancestors** — papers this paper builds on (via CITES + SHARES_METHOD going backward)
+- **Concurrent** — papers published ±6 months using similar methods
+- **Descendants** — papers that cite this paper or extend its methods (forward links)
+- **Contradictions** — papers that dispute its claims or benchmarks
+- **Method siblings** — papers that use the same technique on different problems
+
+```
+GET /papers/{id}/rabbit-hole
+→ {
+    ancestors:    [...],
+    concurrent:   [...],
+    descendants:  [...],
+    contradictions: [...],
+    method_siblings: [...]
+  }
+```
+
+This becomes the killer demo. One URL in → a structured map of the entire conversation
+that paper is part of.
+
+### Missing Experiment Detector
+
+When a paper is ingested, compare its benchmark set against every paper it links to.
+Surface benchmarks that competing papers run but this paper does not.
+
+```python
+# pseudocode
+for each paper P:
+    competing_papers = papers that share method or benchmark with P
+    their_benchmarks = union of all benchmarks in competing_papers
+    p_benchmarks = P's benchmark set
+    missing = their_benchmarks - p_benchmarks
+    if missing:
+        annotate P with: missing_benchmarks = [...]
+```
+
+**API:** `GET /papers/{id}/missing-experiments`
+
+**Frontend:** Show on paper detail page: *"Competing papers also test: HumanEval,
+MBPP — this paper does not."*
+
+This functions as a real research assistant. Nobody else does this.
+
+---
+
+## Phase 10 — Survey Generation + Research Gap Ranking + Contamination Tracker
+**Priority: MEDIUM — high value but needs good data first (ingest 50+ papers)**
+
+### Automatic Survey Generation
+
+After ingesting a cluster of papers:
+
+```
+POST /surveys/generate
+Body: { "topic": "sparse attention mechanisms", "since_year": 2022 }
+```
+
+Claude generates a structured survey:
+- **Key methods** — with lineage and novelty tags
+- **Benchmark progression** — SOTA chart over time
+- **Unresolved problems** — aggregated open problems
+- **Contradictions** — the unresolved disputes
+- **Research gaps** — methods not yet applied, ablations missing
+
+Output: Markdown document. Save to DB, export to Obsidian or Notion.
+
+### Research Gap Ranking
+
+Replace pure LLM reasoning in frontier suggestions with a real signal:
+
+```python
+gap_score = (
+    paper_growth_rate   # how fast new papers are appearing
+    + citation_velocity # how fast existing papers are being cited
+    + open_problems_count
+    - solution_density  # how many papers claim to solve it
+)
+```
+
+Rank topics by `gap_score` — surfaces areas with high activity and low saturation.
+More defensible than "Claude thinks this is interesting."
+
+### Dataset Contamination Tracker
+
+Track known contamination flags for benchmarks:
+
+```sql
+CREATE TABLE benchmark_metadata (
+    dataset         TEXT PRIMARY KEY,
+    known_issues    TEXT[],  -- ['contamination', 'saturation', 'narrow']
+    first_year      INT,
+    common_criticism TEXT
+);
+```
+
+Seed with known problematic benchmarks: MMLU (contamination concerns), GSM8K
+(memorization risk), HumanEval (narrow coverage).
+
+When a paper's main result depends on a flagged benchmark, surface a warning:
+*"Primary benchmark MMLU has known contamination concerns as of 2024."*
+
+---
+
+## Phase 11 — Research Memory (North Star)
+**Priority: HIGHEST LONG-TERM VALUE**
+
+This is the feature that makes lumen a research *partner* rather than a search tool.
+
+### What it is
+
+A queryable timeline of the user's intellectual evolution:
+- What hypotheses they held and when
+- When evidence arrived that changed those beliefs
+- How their notes and annotations shifted over time
+- Which contradictions forced a position change
+
+### The query interface
+
+```
+POST /memory/query
+Body: { "question": "Why did I stop believing sparse attention was sufficient?" }
+```
+
+Lumen answers by traversing:
+1. All hypotheses the user has written
+2. The evidence timeline for each (hypothesis ledger already tracks this)
+3. Notes and annotations on papers
+4. Contradiction events and when they were detected
+
+Claude synthesizes the timeline into a narrative answer.
+
+### Schema additions
+
+```sql
+CREATE TABLE memory_events (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type        TEXT,   -- 'hypothesis_created' | 'evidence_found' | 'contradiction_detected'
+                        -- | 'note_added' | 'belief_changed'
+    subject_id  UUID,   -- hypothesis_id, paper_id, claim_id
+    subject_type TEXT,
+    content     TEXT,
+    embedding   VECTOR(1536),
+    occurred_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Every significant event (new hypothesis, contradiction detected, evidence for/against,
+note added) writes a `memory_event`. The memory query embeds the question, finds
+relevant events, and asks Claude to narrate what happened.
+
+### Why this is the differentiator
+
+Papers are already on the internet. Summaries are already on the internet. The graph
+of *your* reading, your beliefs, and how they changed — that exists nowhere else. This
+is the moat.
+
+---
+
+## Phase 12 — Export Integrations (Obsidian + Notion)
+**Priority: MEDIUM — practical utility, drives retention**
+
+### Obsidian Integration
+
+Export the knowledge graph as a vault of interlinked Markdown notes.
+
+```
+GET /export/obsidian?topic=sparse+attention
+```
+
+Generates a zip of `.md` files:
+```
+vault/
+  papers/
+    1706.03762.md       ← paper detail with [[wiki-links]] to related papers
+    2106.09685.md
+  hypotheses/
+    sparse-attention-hypothesis.md
+  claims/
+    lora-achieves-95-pct.md
+  surveys/
+    sparse-attention-2022-2026.md
+```
+
+Each file uses Obsidian's `[[wikilink]]` syntax so the graph view renders
+automatically.
+
+### Notion Integration
+
+```
+POST /export/notion
+Body: { "database_id": "...", "topic": "..." }
+```
+
+Uses the Notion API to push papers as database entries with properties: title, year,
+authors, arxiv URL, claims (as a list), benchmarks (as a table), status (reading/done).
+
+### BibTeX Export
+
+```
+GET /export/bibtex
+```
+
+Exports all ingested papers as a valid `.bib` file, compatible with Zotero, LaTeX, and
+any reference manager.
+
+---
+
 ## Tech Stack
 
 | Component | Choice | Reason |
@@ -768,12 +1110,18 @@ Data fetching:  SWR
 | LLM extraction | Claude claude-sonnet-4-20250514 | Best structured extraction quality |
 | Embeddings | text-embedding-3-small | Fast, cheap, 1536-dim |
 | Database | PostgreSQL + pgvector | Vectors + relational in one, no extra infra |
-| Graph | NetworkX (in-memory) | Simple, fast for < 10k nodes |
+| Graph (current) | NetworkX (in-memory) | Simple, fast for < 10k nodes. **Abstract the layer.** |
+| Graph (future) | Neo4j / Memgraph | When graph queries become the core interaction pattern |
 | PDF parsing | pdfplumber | Most reliable text extraction |
-| External APIs | arxiv, Semantic Scholar, GitHub | Paper metadata + author enrichment |
+| External APIs | arxiv, Semantic Scholar | Paper metadata |
 | RSS | feedparser + APScheduler | Daily arxiv feed ingestion |
 | Frontend | Next.js 14 + D3 + Recharts | Graph viz + clean UI |
+| Export | Obsidian vault, Notion API, BibTeX | Knowledge portability |
 | Containerization | Docker Compose | One-command local setup |
+
+> **Graph migration note:** The `KnowledgeGraph` class in `knowledge/graph.py` is the
+> only place NetworkX should be imported. All graph operations go through its public
+> API. When migrating to Neo4j, only this file changes.
 
 ---
 
@@ -806,18 +1154,27 @@ catches it automatically — that's the moment the project becomes real.
 
 ## Milestones
 
-| Milestone | What | When |
-|-----------|------|------|
-| M0 | Docker stack running, DB schema migrated | Day 1 |
-| M1 | Full extraction pipeline: arxiv URL → KnowledgeObject | Day 6 |
-| M2 | Citation + method + benchmark linking working | Day 12 |
-| M3 | Contradiction detection catching real conflicts | Day 12 |
-| M4 | Researcher profiles with GitHub cross-linking | Day 16 |
-| M5 | Frontier suggestions from research notes | Day 21 |
-| M6 | Hypothesis ledger with evidence accumulation | Day 21 |
-| M7 | BenchmarkDrift SOTA tracker | Day 21 |
-| M8 | arxiv RSS watcher running daily | Day 24 |
-| M9 | Full frontend — all 7 pages working | Day 31 |
+| Milestone | What | Phase |
+|-----------|------|-------|
+| M0 | Docker stack running, DB schema migrated | 0 |
+| M1 | Full extraction pipeline: arxiv URL → KnowledgeObject | 1 |
+| M2 | Citation + method + benchmark linking working | 2 |
+| M3 | Contradiction detection catching real conflicts | 2 |
+| M4 | Frontier suggestions from research notes | 4 |
+| M5 | Hypothesis ledger with evidence accumulation | 4 |
+| M6 | BenchmarkDrift SOTA tracker | 4 |
+| M7 | arxiv RSS watcher running daily | 5 |
+| M8 | Full frontend — all pages working | 6 |
+| M9 | Specialized extractors (one Claude call per type) | 7 |
+| M10 | Claim evolution timeline + replication score | 8 |
+| M11 | Research Rabbit Mode — explorable paper map | 9 |
+| M12 | Missing experiment detector live | 9 |
+| M13 | Automatic survey generation | 10 |
+| M14 | Research Memory — queryable belief timeline | 11 |
+| M15 | Obsidian + Notion + BibTeX export | 12 |
+
+> M4 (researcher profiles) and GitHub cross-linking are **deprioritized** — moved
+> to post-M15 or dropped. They add complexity without improving the core loop.
 
 ---
 

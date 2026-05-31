@@ -2,9 +2,9 @@ import json
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from knowledge.graph import knowledge_graph  # retained for test compatibility
 
 from config import settings
-from knowledge.graph import knowledge_graph
 from knowledge.store import create_link
 
 
@@ -19,7 +19,8 @@ async def link_by_method(
             text(
                 "SELECT paper_id, name, 1 - (embedding <=> CAST(:emb AS vector)) AS similarity "
                 "FROM methods "
-                "WHERE paper_id != :paper_id "
+                "WHERE workspace_id = current_workspace_id() "
+                "AND paper_id != :paper_id "
                 "AND 1 - (embedding <=> CAST(:emb AS vector)) > :threshold "
                 "ORDER BY embedding <=> CAST(:emb AS vector) "
                 "LIMIT 5"
@@ -39,7 +40,4 @@ async def link_by_method(
                 strength=row.similarity,
                 metadata=meta,
                 db=db,
-            )
-            knowledge_graph.add_edge(
-                paper_id, row.paper_id, "SHARES_METHOD", strength=row.similarity, metadata=meta
             )

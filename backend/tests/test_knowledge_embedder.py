@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from config import settings
 from knowledge.embedder import cosine_similarity, embed_knowledge_object, embed_text, embed_texts
 from tests.conftest import FAKE_EMBEDDING, FAKE_EXTRACTED
 
@@ -44,6 +45,16 @@ class TestCosineSimilarity:
 
 
 class TestEmbedText:
+    @pytest.fixture(autouse=True)
+    def force_openai_provider(self):
+        prev_provider = settings.embedding_provider
+        prev_model = settings.embedding_model
+        settings.embedding_provider = "openai"
+        settings.embedding_model = "text-embedding-3-small"
+        yield
+        settings.embedding_provider = prev_provider
+        settings.embedding_model = prev_model
+
     async def test_returns_list_of_floats(self):
         with patch("knowledge.embedder._client") as mock_factory:
             mock_client = MagicMock()
@@ -54,7 +65,7 @@ class TestEmbedText:
             result = await embed_text("some text")
 
         assert isinstance(result, list)
-        assert len(result) == 1536
+        assert len(result) == settings.embedding_dimensions
         assert all(isinstance(x, float) for x in result)
 
     async def test_calls_api_with_correct_model(self):
@@ -67,11 +78,21 @@ class TestEmbedText:
             await embed_text("text")
 
         call_kwargs = mock_client.embeddings.create.call_args.kwargs
-        assert call_kwargs["model"] == "text-embedding-3-small"
+        assert call_kwargs["model"] == settings.embedding_model
         assert call_kwargs["input"] == "text"
 
 
 class TestEmbedTexts:
+    @pytest.fixture(autouse=True)
+    def force_openai_provider(self):
+        prev_provider = settings.embedding_provider
+        prev_model = settings.embedding_model
+        settings.embedding_provider = "openai"
+        settings.embedding_model = "text-embedding-3-small"
+        yield
+        settings.embedding_provider = prev_provider
+        settings.embedding_model = prev_model
+
     async def test_empty_list_returns_empty(self):
         result = await embed_texts([])
         assert result == []
@@ -106,6 +127,16 @@ class TestEmbedTexts:
 
 
 class TestEmbedKnowledgeObject:
+    @pytest.fixture(autouse=True)
+    def force_openai_provider(self):
+        prev_provider = settings.embedding_provider
+        prev_model = settings.embedding_model
+        settings.embedding_provider = "openai"
+        settings.embedding_model = "text-embedding-3-small"
+        yield
+        settings.embedding_provider = prev_provider
+        settings.embedding_model = prev_model
+
     async def test_returns_all_required_keys(self):
         num_claims = len(FAKE_EXTRACTED["claims"])
         num_methods = len(FAKE_EXTRACTED["methods"])

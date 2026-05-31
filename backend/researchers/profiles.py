@@ -41,7 +41,7 @@ async def build_author_profile(
     db: AsyncSession,
 ) -> str | None:
     existing = await db.execute(
-        text("SELECT id FROM researchers WHERE name = :name"),
+        text("SELECT id FROM researchers WHERE workspace_id = current_workspace_id() AND name = :name"),
         {"name": author_name},
     )
     existing_id = existing.scalar_one_or_none()
@@ -76,15 +76,15 @@ async def build_author_profile(
                 "UPDATE researchers SET institution=:institution, h_index=:h_index, "
                 "citation_count=:citation_count, research_themes=:themes, "
                 "github_username=:github, recent_repos=:repos, refreshed_at=:now "
-                "WHERE id=:id"
+                "WHERE workspace_id = current_workspace_id() AND id=:id"
             ),
             {
                 "institution": institution,
                 "h_index": h_index,
                 "citation_count": citation_count,
-                "themes": json.dumps(themes),
+                "themes": themes,
                 "github": github_username,
-                "repos": json.dumps(recent_repos),
+                "repos": recent_repos,
                 "now": now,
                 "id": profile_id,
             },
@@ -93,9 +93,9 @@ async def build_author_profile(
         await db.execute(
             text(
                 "INSERT INTO researchers "
-                "(id, name, institution, semantic_scholar_id, github_username, h_index, "
+                "(id, workspace_id, name, institution, semantic_scholar_id, github_username, h_index, "
                 "citation_count, research_themes, paper_ids, recent_repos, refreshed_at) "
-                "VALUES (:id, :name, :institution, :ss_id, :github, :h_index, "
+                "VALUES (:id, current_workspace_id(), :name, :institution, :ss_id, :github, :h_index, "
                 ":citation_count, :themes, :paper_ids, :repos, :now)"
             ),
             {
@@ -106,9 +106,9 @@ async def build_author_profile(
                 "github": github_username,
                 "h_index": h_index,
                 "citation_count": citation_count,
-                "themes": json.dumps(themes),
-                "paper_ids": json.dumps([paper_id]),
-                "repos": json.dumps(recent_repos),
+                "themes": themes,
+                "paper_ids": [paper_id],
+                "repos": recent_repos,
                 "now": now,
             },
         )
@@ -119,7 +119,7 @@ async def build_author_profile(
 
 async def get_profile(researcher_id: str, db: AsyncSession) -> dict | None:
     result = await db.execute(
-        text("SELECT * FROM researchers WHERE id = :id"),
+        text("SELECT * FROM researchers WHERE workspace_id = current_workspace_id() AND id = :id"),
         {"id": researcher_id},
     )
     row = result.mappings().one_or_none()
@@ -128,7 +128,7 @@ async def get_profile(researcher_id: str, db: AsyncSession) -> dict | None:
 
 async def get_paper_researchers(paper_id: str, db: AsyncSession) -> list[dict]:
     result = await db.execute(
-        text("SELECT r.* FROM researchers r WHERE r.paper_ids @> :paper_id_json"),
+        text("SELECT r.* FROM researchers r WHERE r.workspace_id = current_workspace_id() AND r.paper_ids @> :paper_id_json"),
         {"paper_id_json": json.dumps([paper_id])},
     )
     return [dict(row) for row in result.mappings().all()]
@@ -136,7 +136,7 @@ async def get_paper_researchers(paper_id: str, db: AsyncSession) -> list[dict]:
 
 async def refresh_profile(researcher_id: str, db: AsyncSession) -> None:
     result = await db.execute(
-        text("SELECT name, paper_ids FROM researchers WHERE id = :id"),
+        text("SELECT name, paper_ids FROM researchers WHERE workspace_id = current_workspace_id() AND id = :id"),
         {"id": researcher_id},
     )
     row = result.mappings().one_or_none()
@@ -146,7 +146,10 @@ async def refresh_profile(researcher_id: str, db: AsyncSession) -> None:
     paper_ids = row["paper_ids"] or []
     if paper_ids:
         paper_result = await db.execute(
-            text("SELECT title, arxiv_url FROM papers WHERE id = :id"),
+            text(
+                "SELECT title, arxiv_url FROM papers "
+                "WHERE workspace_id = current_workspace_id() AND id = :id"
+            ),
             {"id": paper_ids[0]},
         )
         paper = paper_result.mappings().one_or_none()

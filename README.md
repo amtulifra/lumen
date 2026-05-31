@@ -20,13 +20,13 @@ Turn ML papers into structured knowledge. Paste an arxiv URL, get back claims, m
 | Backend | FastAPI + SQLAlchemy async + asyncpg |
 | Database | PostgreSQL + pgvector |
 | LLM | Claude (claude-sonnet-4-20250514) |
-| Embeddings | OpenAI text-embedding-3-small (1536-dim) |
-| Graph | NetworkX in-memory DiGraph |
+| Embeddings | BAAI/bge-small-en-v1.5 via FastEmbed (384-dim) |
+| Graph | PostgreSQL-backed graph traversal |
 | Frontend | Next.js 14 + Tailwind + D3 + Recharts + Zustand |
 
 ## Setup
 
-**Prerequisites:** Docker Desktop, an Anthropic API key, an OpenAI API key.
+**Prerequisites:** Docker Desktop, an Anthropic API key.
 
 ```bash
 cp .env.example .env
@@ -41,10 +41,25 @@ Backend API: http://localhost:8000/docs
 
 ```
 ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
+OPENAI_API_KEY=              # optional, only needed if EMBEDDING_PROVIDER=openai
+EMBEDDING_PROVIDER=fastembed # fastembed or openai
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+EMBEDDING_DIMENSIONS=384
 SEMANTIC_SCHOLAR_API_KEY=   # optional, increases rate limits
 GITHUB_TOKEN=               # optional, enables repo cross-linking
+NOTION_API_KEY=             # optional, required for /export/notion
+CORS_ORIGINS=http://localhost:3000
+AUTH_REQUIRED=false         # set true to enforce Clerk JWT
+CLERK_ISSUER=https://clerk.your-domain.com
+CLERK_AUDIENCE=
+CLERK_JWKS_URL=https://clerk.your-domain.com/.well-known/jwks.json
 ```
+
+## Multi-tenant auth headers
+
+- Every request is scoped to a workspace via `X-Workspace-Id`.
+- In local/dev mode (`AUTH_REQUIRED=false`), you can also pass `X-User-Id` and `X-Role`.
+- In production (`AUTH_REQUIRED=true`), send `Authorization: Bearer <clerk_jwt>` and `X-Workspace-Id`.
 
 ## Running tests
 

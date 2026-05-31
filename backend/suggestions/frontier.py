@@ -36,6 +36,7 @@ async def fetch_relevant_papers(embedding: list[float], db: AsyncSession) -> lis
         text(
             "SELECT id, title, knowledge_obj "
             "FROM papers "
+            "WHERE workspace_id = current_workspace_id() "
             "ORDER BY title_embedding <=> CAST(:emb AS vector) "
             "LIMIT 10"
         ),
@@ -48,6 +49,7 @@ async def fetch_relevant_open_problems(embedding: list[float], db: AsyncSession)
     rows = await db.execute(
         text(
             "SELECT text FROM open_problems "
+            "WHERE workspace_id = current_workspace_id() "
             "ORDER BY embedding <=> CAST(:emb AS vector) "
             "LIMIT 10"
         ),
@@ -65,7 +67,8 @@ async def fetch_method_gaps(
     rows = await db.execute(
         text(
             "SELECT name, description FROM methods "
-            "WHERE paper_id != ALL(:ids) "
+            "WHERE workspace_id = current_workspace_id() "
+            "AND paper_id != ALL(:ids) "
             "ORDER BY embedding <=> CAST(:emb AS vector) "
             "LIMIT 10"
         ),

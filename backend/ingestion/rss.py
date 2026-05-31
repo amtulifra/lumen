@@ -1,10 +1,29 @@
 from datetime import datetime, timezone
 
 import feedparser
+from sqlalchemy import text
 
 from config import settings
 from knowledge.embedder import embed_text
 from knowledge.store import find_similar_papers, paper_exists
+
+# In-memory subscription store — initialized from settings, modifiable at runtime
+_subscriptions: dict[str, str] = dict(settings.rss_feeds)
+
+
+def get_subscriptions() -> dict[str, str]:
+    return dict(_subscriptions)
+
+
+def add_subscription(category: str, url: str) -> None:
+    _subscriptions[category] = url
+
+
+def remove_subscription(category: str) -> bool:
+    if category in _subscriptions:
+        del _subscriptions[category]
+        return True
+    return False
 
 
 async def is_relevant(abstract: str, db) -> bool:
@@ -64,17 +83,29 @@ async def ingest_from_entry(entry, db) -> None:
 
 async def watch_feeds() -> None:
     from database import SessionLocal
+    from database import set_db_request_context
 
     async with SessionLocal() as db:
-        for category, url in settings.rss_feeds.items():
-            feed = feedparser.parse(url)
-            for entry in feed.entries:
-                if await is_relevant(entry.summary, db):
-                    await ingest_from_entry(entry, db)
+        workspace_rows = await db.execute(text("SELECT id FROM workspaces"))
+        workspace_ids = [str(row.id) for row in workspace_rows.all()]
+
+    for workspace_id in workspace_ids:
+        async with SessionLocal() as db:
+            await set_db_request_context(
+                db,
+                workspace_id=workspace_id,
+                user_id="00000000-0000-0000-0000-000000000002",
+                role="owner",
+            )
+            for category, url in _subscriptions.items():
+                feed = feedparser.parse(url)
+                for entry in feed.entries:
+                    if await is_relevant(entry.summary, db):
+                        await ingest_from_entry(entry, db)
 
 
 def get_rss_status() -> dict:
     return {
-        "feeds": list(settings.rss_feeds.keys()),
+        "feeds": list(_subscriptions.keys()),
         "schedule": "daily at 06:00 UTC",
     }
