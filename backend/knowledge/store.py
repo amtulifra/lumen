@@ -66,15 +66,19 @@ async def save_paper(
     for claim, embedding in zip(claims, claim_embeddings):
         await db.execute(
             text(
-                "INSERT INTO claims (id, paper_id, text, confidence, evidence, embedding) "
-                "VALUES (:id, :paper_id, :text, :confidence, :evidence, :embedding)"
+                "INSERT INTO claims "
+                "(id, paper_id, text, confidence, evidence, evidence_span, section, page_number, embedding) "
+                "VALUES (:id, :paper_id, :text, :confidence, :evidence, :evidence_span, :section, :page_number, :embedding)"
             ),
             {
                 "id": str(uuid.uuid4()),
                 "paper_id": paper_id,
                 "text": claim["text"],
                 "confidence": claim.get("confidence", 0.0),
-                "evidence": claim.get("evidence", ""),
+                "evidence": claim.get("evidence", claim.get("evidence_span", "")),
+                "evidence_span": claim.get("evidence_span", claim.get("evidence", "")),
+                "section": claim.get("section", ""),
+                "page_number": claim.get("page_number"),
                 "embedding": json.dumps(embedding),
             },
         )
@@ -100,8 +104,10 @@ async def save_paper(
     for bm in extracted.get("benchmarks", []):
         await db.execute(
             text(
-                "INSERT INTO benchmarks (id, paper_id, dataset, metric, value, model, split) "
-                "VALUES (:id, :paper_id, :dataset, :metric, :value, :model, :split)"
+                "INSERT INTO benchmarks "
+                "(id, paper_id, dataset, metric, value, model, split, prompt_method, benchmark_ver, eval_framework, notes, evidence_span, section, page_number) "
+                "VALUES "
+                "(:id, :paper_id, :dataset, :metric, :value, :model, :split, :prompt_method, :benchmark_ver, :eval_framework, :notes, :evidence_span, :section, :page_number)"
             ),
             {
                 "id": str(uuid.uuid4()),
@@ -111,6 +117,13 @@ async def save_paper(
                 "value": bm.get("value", 0.0),
                 "model": bm.get("model", ""),
                 "split": bm.get("split", "test"),
+                "prompt_method": bm.get("prompt_method", ""),
+                "benchmark_ver": bm.get("benchmark_ver", ""),
+                "eval_framework": bm.get("eval_framework", ""),
+                "notes": bm.get("notes", ""),
+                "evidence_span": bm.get("evidence_span", ""),
+                "section": bm.get("section", ""),
+                "page_number": bm.get("page_number"),
             },
         )
 

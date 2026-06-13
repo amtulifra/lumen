@@ -15,7 +15,12 @@ Return a JSON array:
     "metric": "<exact metric name, e.g. top-1 accuracy, pass@1, BLEU>",
     "value": <number only, no % sign, e.g. 89.2>,
     "model": "<model or system name being evaluated>",
-    "split": "<test/val/train/dev>"
+    "split": "<test/val/train/dev>",
+    "prompt_method": "<cot/zero-shot/few-shot/none if not stated>",
+    "benchmark_ver": "<benchmark version if stated>",
+    "eval_framework": "<evaluation framework/setup if stated>",
+    "notes": "<short caveat/context note>",
+    "evidence_span": "<direct quote or close paraphrase of the reported result>"
   }
 ]
 

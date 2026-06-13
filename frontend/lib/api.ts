@@ -66,6 +66,28 @@ export const api = {
   getFullGraph: () => request("/graph/full"),
 
   getContradictions: () => request("/graph/contradictions"),
+  listConflicts: (severity?: string, dataset?: string, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (severity) params.set("severity", severity);
+    if (dataset) params.set("dataset", dataset);
+    return request(`/conflicts?${params.toString()}`);
+  },
+  submitConflictFeedback: (conflictId: string, feedback: "agree" | "disagree", note = "") =>
+    request(`/conflicts/${conflictId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback, note }),
+    }),
+  listClaimConflicts: (severity?: string, relation?: string, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (severity) params.set("severity", severity);
+    if (relation) params.set("relation", relation);
+    return request(`/conflicts/claims?${params.toString()}`);
+  },
+  submitClaimConflictFeedback: (conflictId: string, feedback: "agree" | "disagree", note = "") =>
+    request(`/conflicts/claims/${conflictId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback, note }),
+    }),
 
   getResearcher: (id: string) => request(`/researchers/${id}`),
 
@@ -81,6 +103,13 @@ export const api = {
   listHypotheses: () => request("/hypotheses"),
 
   getHypothesis: (id: string) => request(`/hypotheses/${id}`),
+  submitEvidenceFeedback: (evidenceId: string, feedback: "agree" | "disagree", note = "") =>
+    request(`/hypotheses/evidence/${evidenceId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback, note }),
+    }),
+  openPaperFromEvidence: (evidenceId: string) =>
+    request(`/hypotheses/evidence/${evidenceId}/open-paper`, { method: "POST" }),
 
   getBenchmarkDrift: (dataset: string, metric: string) =>
     request(`/benchmarks/drift?dataset=${encodeURIComponent(dataset)}&metric=${encodeURIComponent(metric)}`),

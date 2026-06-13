@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     semantic_scholar_api_key: str = ""
     github_token: str = ""
     notion_api_key: str = ""
+    email_provider: str = "none"  # none | resend | postmark
+    email_from: str = "Lumen <noreply@lumen.local>"
+    resend_api_key: str = ""
+    postmark_server_token: str = ""
+    app_base_url: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
     auth_required: bool = False
     clerk_issuer: str = "https://clerk.your-domain.com"
@@ -27,6 +32,9 @@ class Settings(BaseSettings):
     hypothesis_similarity_threshold: float = 0.80
     rss_relevance_threshold: float = 0.75
     benchmark_contradiction_delta: float = 1.0
+    conflict_likely_delta: float = 2.0
+    conflict_strong_delta: float = 5.0
+    conflict_verified_delta: float = 10.0
 
     max_pdf_tokens: int = 12000
     extraction_retry_limit: int = 1

@@ -14,8 +14,13 @@ logger = logging.getLogger("lumen")
 
 EVENT_TYPES = {
     "hypothesis_created",
-    "evidence_found",
-    "belief_changed",
+    "evidence_matched",
+    "notification_sent",
+    "notification_opened",
+    "evidence_viewed",
+    "paper_opened_from_evidence",
+    "evidence_feedback_given",
+    "hypothesis_status_updated",
     "contradiction_detected",
     "paper_ingested",
 }

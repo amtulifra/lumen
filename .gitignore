@@ -1,6 +1,7 @@
 .venv/
 node_modules/
 memory/
+Memory/
 .next/
 next-env.d.ts
 tsconfig.tsbuildinfo
@@ -24,3 +25,9 @@ build/
 *.tar.gz
 *.whl
 Plan.md
+plan.md
+.env
+.env.*
+!.env.example
+.python-version
+.coverage

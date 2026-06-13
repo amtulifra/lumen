@@ -14,7 +14,9 @@ Return a JSON array:
   {
     "text": "<one sentence, the core contribution>",
     "confidence": <0.0-1.0, how explicitly stated vs implied>,
-    "evidence": "<direct quote or close paraphrase from the paper body>"
+    "evidence_span": "<direct quote or close paraphrase from the paper body>",
+    "section": "<best section label if known, e.g. abstract/method/results/discussion>",
+    "page_number": <integer page number if known, otherwise null>
   }
 ]
 

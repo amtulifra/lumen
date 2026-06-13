@@ -9,14 +9,8 @@ type Role = "viewer" | "editor" | "admin" | "owner";
 
 const navLinks: Array<{ href: string; label: string; minRole: Role }> = [
   { href: "/", label: "ingest", minRole: "editor" },
-  { href: "/graph", label: "graph", minRole: "viewer" },
-  { href: "/frontier", label: "frontier", minRole: "viewer" },
   { href: "/hypotheses", label: "hypotheses", minRole: "editor" },
-  { href: "/benchmarks", label: "benchmarks", minRole: "viewer" },
-  { href: "/surveys", label: "surveys", minRole: "viewer" },
-  { href: "/gaps", label: "gaps", minRole: "viewer" },
-  { href: "/memory", label: "memory", minRole: "viewer" },
-  { href: "/export", label: "export", minRole: "viewer" },
+  { href: "/conflicts", label: "conflicts", minRole: "viewer" },
 ];
 
 const ROLE_RANK: Record<Role, number> = {

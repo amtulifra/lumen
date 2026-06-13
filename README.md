@@ -1,17 +1,34 @@
 # Lumen
 
-Turn ML papers into structured knowledge. Paste an arxiv URL, get back claims, methods, benchmarks, and limitations — automatically linked to every other paper you've read.
+Lumen is a scientific memory system for ML research.
 
-## What it does
+Core loop:
 
-- **Ingest** any arxiv URL → extracts structured knowledge (claims, methods, benchmarks, limitations, open problems) via Claude
-- **Links papers automatically** — by citation, shared methods, shared benchmarks, and contradictions
-- **Contradiction detection** — flags when two papers report different numbers for the same model/dataset/metric
-- **Hypothesis ledger** — write a hypothesis, Lumen watches every new paper for evidence that supports or refutes it
-- **Frontier suggestions** — describe what you're working on, get 5 concrete research directions backed by your graph
-- **Researcher profiles** — auto-enriched from Semantic Scholar + GitHub
-- **Benchmark drift** — SOTA leaderboard over time across all ingested papers
-- **RSS watcher** — daily arxiv feed ingestion, only pulls papers relevant to your existing graph
+**Papers -> Claims/Benchmarks with provenance -> Conflicts/Evidence -> Hypothesis updates + notifications**
+
+The v1 focus is narrow: help researchers track whether new papers support, refute, or qualify their hypotheses with cited evidence.
+
+## Why it exists
+
+Most research tools summarize papers once. Lumen is built for longitudinal belief tracking:
+
+1. Write a hypothesis.
+2. Ingest papers continuously.
+3. See cited evidence/conflicts that impact that hypothesis.
+4. Give feedback (`agree`/`disagree`) to improve trust.
+5. Get notified when new evidence changes confidence.
+
+## What is implemented (v1 core)
+
+- Ingestion (`/ingest`, `/ingest/abstract`) with section-aware extraction foundation.
+- Hypothesis ledger with normalized evidence and provenance (`cited_span`, `section`, `page_number`, reasoning).
+- Benchmark conflicts with 4-level severity: `possible`, `likely`, `strong`, `verified`.
+- Claim conflicts track with feedback.
+- Feedback APIs for evidence and conflicts.
+- Notification instrumentation events for the full loop.
+- Light beige/cream UI with focused nav: `/`, `/hypotheses`, `/conflicts`.
+
+For implementation details and current internal status, see `memory/project_lumen.md`.
 
 ## Stack
 
@@ -19,71 +36,89 @@ Turn ML papers into structured knowledge. Paste an arxiv URL, get back claims, m
 |-------|------|
 | Backend | FastAPI + SQLAlchemy async + asyncpg |
 | Database | PostgreSQL + pgvector |
-| LLM | Claude (claude-sonnet-4-20250514) |
+| LLM | Claude (Anthropic) |
 | Embeddings | BAAI/bge-small-en-v1.5 via FastEmbed (384-dim) |
-| Graph | PostgreSQL-backed graph traversal |
-| Frontend | Next.js 14 + Tailwind + D3 + Recharts + Zustand |
+| Frontend | Next.js 14 + Tailwind + SWR |
 
-## Setup
+## Quickstart
 
-**Prerequisites:** Docker Desktop, an Anthropic API key.
+Prerequisites: Docker Desktop + Anthropic API key.
 
 ```bash
 cp .env.example .env
-# fill in your keys
+# fill in ANTHROPIC_API_KEY (and optional email vars)
 docker compose up
 ```
 
-Frontend: http://localhost:3000  
-Backend API: http://localhost:8000/docs
+- Frontend: http://localhost:3000
+- Backend API docs: http://localhost:8000/docs
 
 ## Environment variables
 
-```
+Required:
+
+```bash
 ANTHROPIC_API_KEY=
-OPENAI_API_KEY=              # optional, only needed if EMBEDDING_PROVIDER=openai
-EMBEDDING_PROVIDER=fastembed # fastembed or openai
-EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-EMBEDDING_DIMENSIONS=384
-SEMANTIC_SCHOLAR_API_KEY=   # optional, increases rate limits
-GITHUB_TOKEN=               # optional, enables repo cross-linking
-NOTION_API_KEY=             # optional, required for /export/notion
-CORS_ORIGINS=http://localhost:3000
-AUTH_REQUIRED=false         # set true to enforce Clerk JWT
+DATABASE_URL=postgresql+asyncpg://lumen:lumen@localhost:5432/lumen
+```
+
+Optional (email notifications):
+
+```bash
+EMAIL_PROVIDER=none            # none | resend | postmark
+EMAIL_FROM="Lumen <noreply@lumen.local>"
+RESEND_API_KEY=
+POSTMARK_SERVER_TOKEN=
+APP_BASE_URL=http://localhost:3000
+```
+
+Optional (auth/workspace):
+
+```bash
+AUTH_REQUIRED=false
 CLERK_ISSUER=https://clerk.your-domain.com
 CLERK_AUDIENCE=
 CLERK_JWKS_URL=https://clerk.your-domain.com/.well-known/jwks.json
 ```
 
-## Multi-tenant auth headers
+## Multi-tenant headers
 
-- Every request is scoped to a workspace via `X-Workspace-Id`.
-- In local/dev mode (`AUTH_REQUIRED=false`), you can also pass `X-User-Id` and `X-Role`.
+- Workspace scoping uses `X-Workspace-Id`.
+- In local/dev (`AUTH_REQUIRED=false`), you can also pass `X-User-Id` and `X-Role`.
 - In production (`AUTH_REQUIRED=true`), send `Authorization: Bearer <clerk_jwt>` and `X-Workspace-Id`.
 
-## Running tests
+## Tests
 
 ```bash
 cd backend
 pytest tests/ -v
 ```
 
-107 tests, no database required.
+## Migration health check
 
-## API
+Run before/after schema changes:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/ingest` | Ingest paper by arxiv URL |
-| POST | `/ingest/abstract` | Ingest by title + abstract |
-| GET | `/papers` | List all ingested papers |
-| GET | `/papers/{id}` | Paper detail + knowledge object |
-| GET | `/papers/{id}/links` | All graph edges for a paper |
-| GET | `/graph/full` | Full graph (nodes + edges) |
-| GET | `/graph/contradictions` | All contradiction edges |
-| POST | `/suggestions` | Frontier suggestions from notes |
-| POST | `/hypotheses` | Add a hypothesis |
-| GET | `/hypotheses` | List all hypotheses |
-| GET | `/benchmarks/drift` | SOTA over time for dataset+metric |
-| GET | `/rss/status` | RSS watcher status |
-| POST | `/rss/run` | Trigger manual feed run |
+```bash
+python db/migrations/check_health.py
+```
+
+It validates:
+- revision/down_revision integrity
+- single head
+- no disconnected revisions
+- migration-created tables reflected in `db/schema.sql`
+
+## Key v1 endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/ingest` | Ingest paper by arXiv URL |
+| POST | `/ingest/abstract` | Ingest title + abstract |
+| GET | `/hypotheses` | List hypotheses with evidence |
+| POST | `/hypotheses` | Create hypothesis |
+| POST | `/hypotheses/evidence/{id}/feedback` | Evidence feedback |
+| GET | `/conflicts` | Benchmark conflicts |
+| POST | `/conflicts/{id}/feedback` | Benchmark conflict feedback |
+| GET | `/conflicts/claims` | Claim conflicts |
+| POST | `/conflicts/claims/{id}/feedback` | Claim conflict feedback |
+| GET | `/notifications` | In-app notifications |

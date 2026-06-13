@@ -224,6 +224,51 @@ class TestPhaseEndpoints:
         assert response.status_code == 200
         assert response.json()["answer"] == "A"
 
+    def test_hypothesis_evidence_feedback(self, client, mock_db):
+        payload = {"status": "ok", "feedback": "agree"}
+        with patch("api.routes.submit_evidence_feedback", new_callable=AsyncMock, return_value=payload):
+            response = client.post(
+                "/hypotheses/evidence/e1/feedback",
+                json={"feedback": "agree", "note": "looks correct"},
+            )
+        assert response.status_code == 200
+        assert response.json()["feedback"] == "agree"
+
+    def test_open_paper_from_evidence(self, client, mock_db):
+        payload = {"paper_id": "p1"}
+        with patch("api.routes.log_paper_open_from_evidence", new_callable=AsyncMock, return_value=payload):
+            response = client.post("/hypotheses/evidence/e1/open-paper")
+        assert response.status_code == 200
+        assert response.json()["paper_id"] == "p1"
+
+    def test_list_conflicts(self, client, mock_db):
+        payload = [{"id": "c1", "severity": "likely", "dataset": "MMLU"}]
+        with patch("api.routes.list_benchmark_conflicts", new_callable=AsyncMock, return_value=payload):
+            response = client.get("/conflicts")
+        assert response.status_code == 200
+        assert response.json()[0]["id"] == "c1"
+
+    def test_conflict_feedback(self, client, mock_db):
+        payload = {"status": "ok", "feedback": "agree"}
+        with patch("api.routes.submit_conflict_feedback", new_callable=AsyncMock, return_value=payload):
+            response = client.post("/conflicts/c1/feedback", json={"feedback": "agree", "note": ""})
+        assert response.status_code == 200
+        assert response.json()["feedback"] == "agree"
+
+    def test_list_claim_conflicts(self, client, mock_db):
+        payload = [{"id": "cc1", "relation": "challenges"}]
+        with patch("api.routes.list_claim_conflicts", new_callable=AsyncMock, return_value=payload):
+            response = client.get("/conflicts/claims")
+        assert response.status_code == 200
+        assert response.json()[0]["id"] == "cc1"
+
+    def test_claim_conflict_feedback(self, client, mock_db):
+        payload = {"status": "ok", "feedback": "disagree"}
+        with patch("api.routes.submit_claim_conflict_feedback", new_callable=AsyncMock, return_value=payload):
+            response = client.post("/conflicts/claims/cc1/feedback", json={"feedback": "disagree", "note": ""})
+        assert response.status_code == 200
+        assert response.json()["feedback"] == "disagree"
+
     def test_claim_score(self, client, mock_db):
         with patch("api.routes.get_claim_score", new_callable=AsyncMock, return_value={"score": 0.7}):
             response = client.get("/claims/c1/score")

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import require_admin, require_editor, require_viewer
 from api.models import (
+    EvidenceFeedbackRequest,
     GraphSubgraphOut,
     HypothesisCreateRequest,
     HypothesisOut,
@@ -41,7 +42,13 @@ from knowledge.store import (
     search_papers,
 )
 from linking.benchmark import link_by_benchmark
+from linking.benchmark_conflicts import list_benchmark_conflicts, submit_conflict_feedback
 from linking.citation import link_by_citation
+from linking.claim_conflicts import (
+    list_claim_conflicts,
+    submit_claim_conflict_feedback,
+    sync_claim_conflicts_for_paper,
+)
 from linking.contradiction import detect_contradictions
 from linking.method import link_by_method
 from notifications import list_notifications, mark_all_read, mark_read
@@ -71,6 +78,8 @@ from suggestions.hypotheses import (
     create_hypothesis,
     get_hypothesis,
     list_hypotheses,
+    log_paper_open_from_evidence,
+    submit_evidence_feedback,
 )
 from suggestions.survey import generate_survey
 
@@ -117,6 +126,7 @@ async def run_full_ingestion(
     await detect_contradictions(paper_id, extracted.get("benchmarks", []), db)
     await check_hypotheses_for_paper(paper_id, extracted, db)
     await build_claim_lineage(paper_id, db)
+    await sync_claim_conflicts_for_paper(paper_id, db)
 
     await record_event(
         event_type="paper_ingested",
@@ -212,6 +222,7 @@ async def ingest_abstract(
     await detect_contradictions(paper_id, extracted.get("benchmarks", []), db)
     await check_hypotheses_for_paper(paper_id, extracted, db)
     await build_claim_lineage(paper_id, db)
+    await sync_claim_conflicts_for_paper(paper_id, db)
 
     await record_event(
         event_type="paper_ingested",
@@ -339,7 +350,79 @@ async def get_hypothesis_detail(hypothesis_id: str, db: AsyncSession = Depends(g
     hypothesis = await get_hypothesis(hypothesis_id, db)
     if not hypothesis:
         raise HTTPException(status_code=404, detail="Hypothesis not found")
+    await record_event(
+        event_type="evidence_viewed",
+        subject_id=hypothesis_id,
+        subject_type="hypothesis",
+        content=f"Hypothesis evidence viewed for hypothesis {hypothesis_id}",
+        db=db,
+    )
     return hypothesis
+
+
+@router.post("/hypotheses/evidence/{evidence_id}/feedback", dependencies=[Depends(require_editor)])
+async def feedback_hypothesis_evidence(
+    evidence_id: str,
+    request: EvidenceFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await submit_evidence_feedback(evidence_id, request.feedback, request.note, db)
+
+
+@router.post("/hypotheses/evidence/{evidence_id}/open-paper")
+async def paper_opened_from_evidence(
+    evidence_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await log_paper_open_from_evidence(evidence_id, db)
+
+
+@router.get("/conflicts")
+async def get_conflicts(
+    severity: str = Query(default=""),
+    dataset: str = Query(default=""),
+    limit: int = Query(default=100, le=300),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_benchmark_conflicts(
+        db,
+        severity=severity or None,
+        dataset=dataset or None,
+        limit=limit,
+    )
+
+
+@router.post("/conflicts/{conflict_id}/feedback", dependencies=[Depends(require_editor)])
+async def feedback_conflict(
+    conflict_id: str,
+    request: EvidenceFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await submit_conflict_feedback(conflict_id, request.feedback, request.note, db)
+
+
+@router.get("/conflicts/claims")
+async def get_claim_conflicts(
+    severity: str = Query(default=""),
+    relation: str = Query(default=""),
+    limit: int = Query(default=100, le=300),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_claim_conflicts(
+        db,
+        severity=severity or None,
+        relation=relation or None,
+        limit=limit,
+    )
+
+
+@router.post("/conflicts/claims/{conflict_id}/feedback", dependencies=[Depends(require_editor)])
+async def feedback_claim_conflict(
+    conflict_id: str,
+    request: EvidenceFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await submit_claim_conflict_feedback(conflict_id, request.feedback, request.note, db)
 
 
 @router.get("/benchmarks/drift")

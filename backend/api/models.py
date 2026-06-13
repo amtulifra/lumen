@@ -36,6 +36,13 @@ class BenchmarkOut(BaseModel):
     value: float
     model: str
     split: str
+    prompt_method: str | None = None
+    benchmark_ver: str | None = None
+    eval_framework: str | None = None
+    notes: str | None = None
+    evidence_span: str | None = None
+    section: str | None = None
+    page_number: int | None = None
 
 
 class KnowledgeObjectOut(BaseModel):
@@ -121,3 +128,8 @@ class NotificationOut(BaseModel):
     payload: dict
     read: bool
     created_at: str
+
+
+class EvidenceFeedbackRequest(BaseModel):
+    feedback: str
+    note: str = ""
